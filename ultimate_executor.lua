@@ -1,4 +1,8 @@
--- Rayfield GUI betöltése
+-- ============================================================
+--  PLOT & EGG TELEPORT + SPEED  (by Te)
+--  Rayfield GUI - Delta Executor kompatibilis
+-- ============================================================
+
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
 local Players = game:GetService("Players")
@@ -13,29 +17,13 @@ local Window = Rayfield:CreateWindow({
 })
 
 -- Tabok
-local MainTab = Window:CreateTab("Főmenü", 4483362458)
+local MainTab  = Window:CreateTab("Főmenü", 4483362458)
 local SpeedTab = Window:CreateTab("Speed", 4483362458)
 local EggsTab  = Window:CreateTab("LiveAreaEggs", 4483362458)
 
-------------------------------------------------------------
--- 1) TELEK TELEPORT
-------------------------------------------------------------
-local function getPlotPosition()
-    local plot = game.Workspace:FindFirstChild("Plot")
-    if plot and plot:IsA("BasePart") then
-        return plot.Position + Vector3.new(0, 5, 0)
-    end
-    local namedPlot = game.Workspace:FindFirstChild(LocalPlayer.Name .. "Plot")
-    if namedPlot and namedPlot:IsA("BasePart") then
-        return namedPlot.Position + Vector3.new(0, 5, 0)
-    end
-    local spawn = game.Workspace:FindFirstChild("SpawnLocation")
-    if spawn and spawn:IsA("BasePart") then
-        return spawn.Position + Vector3.new(0, 5, 0)
-    end
-    return nil
-end
-
+-- ============================================================
+--  TELEPORT SEGÉDFÜGGVÉNY
+-- ============================================================
 local function teleportTo(pos)
     local char = LocalPlayer.Character
     if not char then return false, "Nincs karaktered!" end
@@ -45,12 +33,114 @@ local function teleportTo(pos)
     return true
 end
 
+-- ============================================================
+--  1) TELEK POZÍCIÓ (FEJLETT KERESÉS)
+-- ============================================================
+local function getPlotPosition()
+    -- 1) Közvetlen nevek
+    local directNames = {"Plot", "MyPlot", "Base", "House", "Home", "PlotArea", "Plot1", "Plot2"}
+    for _, name in ipairs(directNames) do
+        local obj = game.Workspace:FindFirstChild(name)
+        if obj then
+            if obj:IsA("BasePart") then
+                return obj.Position + Vector3.new(0, 5, 0)
+            end
+            local part = obj:FindFirstChildWhichIsA("BasePart", true)
+            if part then return part.Position + Vector3.new(0, 5, 0) end
+        end
+    end
+
+    -- 2) Játékos nevéhez kötött plot
+    local pname = LocalPlayer.Name
+    local possibleNames = {
+        pname .. "Plot",
+        pname .. "'s Plot",
+        pname .. "_Plot",
+        pname .. "Base",
+        pname .. "'s Base",
+        "Plot_" .. pname,
+        "Plot" .. pname,
+    }
+    for _, name in ipairs(possibleNames) do
+        local obj = game.Workspace:FindFirstChild(name)
+        if obj then
+            if obj:IsA("BasePart") then
+                return obj.Position + Vector3.new(0, 5, 0)
+            end
+            local part = obj:FindFirstChildWhichIsA("BasePart", true)
+            if part then return part.Position + Vector3.new(0, 5, 0) end
+        end
+    end
+
+    -- 3) Bejárás: plot/base/house/home nevű objektumok, ami a játékoshoz tartozik
+    for _, obj in ipairs(game.Workspace:GetDescendants()) do
+        local lname = obj.Name:lower()
+        if lname:find("plot") or lname:find("base") or lname:find("house") or lname:find("home") then
+            local owner = obj:FindFirstChild("Owner")
+                or obj:FindFirstChild("Player")
+                or obj:FindFirstChild("OwnerName")
+            local isMine = false
+            if owner then
+                if owner:IsA("ObjectValue") and owner.Value == LocalPlayer then
+                    isMine = true
+                elseif owner:IsA("StringValue") and owner.Value == LocalPlayer.Name then
+                    isMine = true
+                end
+            end
+            if obj.Name:find(LocalPlayer.Name, 1, true) then
+                isMine = true
+            end
+            if isMine then
+                if obj:IsA("BasePart") then
+                    return obj.Position + Vector3.new(0, 5, 0)
+                end
+                local part = obj:FindFirstChildWhichIsA("BasePart", true)
+                if part then return part.Position + Vector3.new(0, 5, 0) end
+            end
+        end
+    end
+
+    -- 4) SpawnLocation
+    local spawn = game.Workspace:FindFirstChild("SpawnLocation")
+    if spawn and spawn:IsA("BasePart") then
+        return spawn.Position + Vector3.new(0, 5, 0)
+    end
+
+    -- 5) Fallback: jelenlegi pozíció
+    if LocalPlayer.Character then
+        local hrp = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+        if hrp then return hrp.Position end
+    end
+
+    return nil
+end
+
+-- Debug: kiírja a konzolba a plot-szerű objektumokat
+local function debugPlots()
+    print("=== PLOT DEBUG ===")
+    print("Játékos neve:", LocalPlayer.Name)
+    for _, obj in ipairs(game.Workspace:GetDescendants()) do
+        local n = obj.Name:lower()
+        if n:find("plot") or n:find("base") or n:find("house") or n:find("home") then
+            print("Talált:", obj:GetFullName(), "| Típus:", obj.ClassName)
+            local owner = obj:FindFirstChild("Owner") or obj:FindFirstChild("Player")
+            if owner then
+                print("  -> Owner:", owner.ClassName, owner.Value)
+            end
+        end
+    end
+    print("=== VÉGE ===")
+end
+
+-- ============================================================
+--  FŐMENÜ
+-- ============================================================
 MainTab:CreateButton({
-    Name = "Teleport a telekre",
+    Name = "🏠 Teleport a telekre",
     Callback = function()
         local pos = getPlotPosition()
         if not pos then
-            Rayfield:Notify({Title="Hiba", Content="Nem találom a telket!", Duration=3})
+            Rayfield:Notify({Title="Hiba", Content="Nem találom a telket!", Duration=5})
             return
         end
         local ok, err = teleportTo(pos)
@@ -62,9 +152,17 @@ MainTab:CreateButton({
     end
 })
 
-------------------------------------------------------------
--- 2) SPEED HACK
-------------------------------------------------------------
+MainTab:CreateButton({
+    Name = "🔍 Debug (plot nevek az F9 konzolba)",
+    Callback = function()
+        debugPlots()
+        Rayfield:Notify({Title="Debug", Content="Nézd meg az F9 konzolt!", Duration=3})
+    end
+})
+
+-- ============================================================
+--  2) SPEED HACK
+-- ============================================================
 local currentSpeed = 16
 local defaultSpeed = 16
 
@@ -86,7 +184,7 @@ SpeedTab:CreateSlider({
 })
 
 SpeedTab:CreateButton({
-    Name = "Speed alkalmazása most",
+    Name = "▶ Speed alkalmazása most",
     Callback = function()
         local char = LocalPlayer.Character
         if char then
@@ -100,7 +198,7 @@ SpeedTab:CreateButton({
 })
 
 SpeedTab:CreateButton({
-    Name = "Reset (16)",
+    Name = "🔄 Reset (16)",
     Callback = function()
         currentSpeed = defaultSpeed
         local char = LocalPlayer.Character
@@ -112,20 +210,17 @@ SpeedTab:CreateButton({
     end
 })
 
--- Karakter újraéledéskor is tartsa a speedet
 LocalPlayer.CharacterAdded:Connect(function(char)
     task.wait(1)
     local hum = char:FindFirstChildOfClass("Humanoid")
     if hum then hum.WalkSpeed = currentSpeed end
 end)
 
-------------------------------------------------------------
--- 3) LIVEAREAEGGS TELEPORT
-------------------------------------------------------------
--- Beállítható: hol keresse a tojásokat
-local EGG_FOLDER_NAMES = { "LiveAreaEggs", "Eggs", "LiveEggs" }
+-- ============================================================
+--  3) LIVEAREAEGGS TELEPORT
+-- ============================================================
+local EGG_FOLDER_NAMES = { "LiveAreaEggs", "Eggs", "LiveEggs", "LiveAreaEgg" }
 
--- Tojás pozíciójának lekérése (BasePart, Model, vagy Attachment is lehet)
 local function getPositionFromInstance(inst)
     if inst:IsA("BasePart") then
         return inst.Position
@@ -135,13 +230,11 @@ local function getPositionFromInstance(inst)
     elseif inst:IsA("Attachment") then
         return inst.WorldPosition
     end
-    -- Ha van benne BasePart, azt használjuk
     local part = inst:FindFirstChildWhichIsA("BasePart", true)
     if part then return part.Position end
     return nil
 end
 
--- Összegyűjti az összes tojást a megadott mappákból
 local function collectEggs()
     local eggs = {}
     local seen = {}
@@ -149,11 +242,9 @@ local function collectEggs()
         local folder = game.Workspace:FindFirstChild(folderName)
         if folder then
             for _, obj in ipairs(folder:GetDescendants()) do
-                -- Csak olyan objektumok, amiknek van pozíciója és nem duplikált
                 if not seen[obj] then
                     local pos = getPositionFromInstance(obj)
                     if pos then
-                        -- Csak akkor vesszük fel, ha van neve és nem egy konténer
                         if obj.Name ~= "" and (obj:IsA("BasePart") or obj:IsA("Model") or obj:IsA("Attachment")) then
                             seen[obj] = true
                             table.insert(eggs, { name = obj.Name, pos = pos, obj = obj })
@@ -166,16 +257,23 @@ local function collectEggs()
     return eggs
 end
 
--- UI elemek
-local eggDropdown -- később töltjük fel
+local eggDropdown
 local eggList = {}
 
-local refreshButton
 local function refreshEggList()
     eggList = collectEggs()
     local names = {}
+    local seenNames = {}
     for _, e in ipairs(eggList) do
-        table.insert(names, e.name)
+        local display = e.name
+        local counter = 1
+        while seenNames[display] do
+            counter = counter + 1
+            display = e.name .. " (" .. counter .. ")"
+        end
+        seenNames[display] = true
+        e.display = display
+        table.insert(names, display)
     end
     if #names == 0 then
         names = { "(nincs tojás)" }
@@ -190,7 +288,6 @@ local function refreshEggList()
     })
 end
 
--- Dropdown létrehozása
 eggDropdown = EggsTab:CreateDropdown({
     Name = "Válassz tojást",
     Options = { "(kattints a Refresh-re)" },
@@ -198,13 +295,12 @@ eggDropdown = EggsTab:CreateDropdown({
     MultipleOptions = false,
     Flag = "EggDropdown",
     Callback = function(option)
-        -- kiválasztott tojás neve
         local chosen = option
         if type(option) == "table" then chosen = option[1] end
         if not chosen or chosen == "(nincs tojás)" or chosen == "(kattints a Refresh-re)" then return end
 
         for _, e in ipairs(eggList) do
-            if e.name == chosen then
+            if e.display == chosen or e.name == chosen then
                 local ok, err = teleportTo(e.pos + Vector3.new(0, 3, 0))
                 Rayfield:Notify({
                     Title = ok and "Teleport" or "Hiba",
@@ -217,7 +313,6 @@ eggDropdown = EggsTab:CreateDropdown({
     end
 })
 
--- Refresh gomb
 EggsTab:CreateButton({
     Name = "🔄 Refresh tojáslista",
     Callback = function()
@@ -225,8 +320,16 @@ EggsTab:CreateButton({
     end
 })
 
--- Automatikus első betöltés
 task.spawn(function()
     task.wait(1)
     refreshEggList()
 end)
+
+-- ============================================================
+--  BETÖLTÉS KÉSZ
+-- ============================================================
+Rayfield:Notify({
+    Title = "Betöltve!",
+    Content = "Plot & Egg Teleport + Speed aktív.",
+    Duration = 4
+})
