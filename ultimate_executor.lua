@@ -39,9 +39,7 @@ local function getPositionFromInstance(inst)
     return nil
 end
 
--- Get rarity of an egg (attribute, string value, or parse name)
 local function getEggRarity(egg)
-    -- 1. Check for StringValue / Attribute called "Rarity"
     local attr = egg:GetAttribute("Rarity")
     if attr then return tostring(attr) end
 
@@ -51,7 +49,6 @@ local function getEggRarity(egg)
         if rarityVal:IsA("ObjectValue") and rarityVal.Value then return rarityVal.Value.Name end
     end
 
-    -- 2. Parse from name (e.g. "LegendaryEgg", "Epic_Egg", "MythicEgg_01")
     local name = egg.Name
     local knownRarities = {"Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythic", "Secret", "Godly", "Divine"}
     for _, r in ipairs(knownRarities) do
@@ -64,7 +61,7 @@ local function getEggRarity(egg)
 end
 
 -- ============================================================
---  PLOT FINDER (for returning home)
+--  PLOT FINDER
 -- ============================================================
 local function getPlotPosition()
     local directNames = {"Plot", "MyPlot", "Base", "House", "Home", "PlotArea", "PlayerPlot"}
@@ -85,7 +82,6 @@ local function getPlotPosition()
         if part then return part.Position + Vector3.new(0, 5, 0) end
     end
 
-    -- Search for plots owned by player
     for _, obj in ipairs(game.Workspace:GetDescendants()) do
         local n = obj.Name:lower()
         if n:find("plot") or n:find("base") then
@@ -103,7 +99,6 @@ local function getPlotPosition()
         end
     end
 
-    -- Fallback: SpawnLocation
     local spawn = game.Workspace:FindFirstChild("SpawnLocation")
     if spawn and spawn:IsA("BasePart") then
         return spawn.Position + Vector3.new(0, 5, 0)
@@ -239,11 +234,10 @@ EggsTab:CreateButton({
     Callback = function()
         local rarities = getAvailableRarities()
         pcall(function() rarityDropdown:Refresh(rarities) end)
-        Rayfield:Notify({Title="Refresh", Content=#eggList.." eggs loaded, "..#rarities.." rarities.", Duration=3})
+        Rayfield:Notify({Title="Refresh", Content=#eggList.." eggs, "..#rarities.." rarities.", Duration=3})
     end
 })
 
--- Steal range
 local stealRange = 15
 EggsTab:CreateSlider({
     Name = "Pickup Distance",
@@ -255,19 +249,17 @@ EggsTab:CreateSlider({
     Callback = function(value) stealRange = value end,
 })
 
--- Pickup hold time (how long to wait after arriving before pressing E)
-local holdTime = 0.3
+local holdTime = 0.4
 EggsTab:CreateSlider({
     Name = "Pickup Delay (sec)",
     Range = {0.1, 2},
     Increment = 0.1,
     Suffix = "s",
-    CurrentValue = 0.3,
+    CurrentValue = 0.4,
     Flag = "HoldTimeSlider",
     Callback = function(value) holdTime = value end,
 })
 
--- Return to plot delay
 local returnDelay = 0.8
 EggsTab:CreateSlider({
     Name = "Return to Plot Delay (sec)",
@@ -280,7 +272,7 @@ EggsTab:CreateSlider({
 })
 
 -- ============================================================
---  AUTO STEAL LOOP (Rarity-Based)
+--  AUTO STEAL LOOP
 -- ============================================================
 local autoStealEnabled = false
 local stealing = false
@@ -295,44 +287,68 @@ EggsTab:CreateToggle({
     end
 })
 
--- Teleport helper
 local function tpTo(pos)
     local hrp = getHRP()
     if hrp then hrp.CFrame = CFrame.new(pos) end
 end
 
--- Try to pick up an egg (multiple methods)
+-- ============================================================
+--  TRY PICKUP (6 METHODS - IMPROVED)
+-- ============================================================
 local function tryPickup(eggInstance)
     local prompt = eggInstance:FindFirstChildWhichIsA("ProximityPrompt", true)
+
     if prompt then
+        -- 1. fireproximityprompt
         pcall(function() fireproximityprompt(prompt) end)
-        if prompt.HoldDuration and prompt.HoldDuration > 0 then
-            pcall(function()
-                prompt:InputHoldBegin()
-                task.wait(prompt.HoldDuration + 0.05)
-                prompt:InputHoldEnd()
-            end)
-        end
+
+        -- 2. InputHold Begin/End
+        pcall(function()
+            prompt:InputHoldBegin()
+            task.wait(prompt.HoldDuration > 0 and prompt.HoldDuration + 0.1 or 0.3)
+            prompt:InputHoldEnd()
+        end)
+
+        -- 3. InputPressed / InputReleased
+        pcall(function()
+            prompt:InputPressed()
+            task.wait(0.15)
+            prompt:InputReleased()
+        end)
+
+        -- 4. fireproximityprompt second time
+        pcall(function() fireproximityprompt(prompt) end)
     end
-    -- Key press fallback
+
+    -- 5. VirtualInputManager - real E key simulation
     pcall(function()
-        keypress(0x45) -- E
+        local VIM = game:GetService("VirtualInputManager")
+        VIM:SendKeyEvent(true, Enum.KeyCode.E, false, game)
         task.wait(0.05)
-        keyrelease(0x45)
+        VIM:SendKeyEvent(false, Enum.KeyCode.E, false, game)
+    end)
+
+    -- 6. VirtualUser fallback
+    pcall(function()
+        local VU = game:GetService("VirtualUser")
+        VU:Button1Down(Vector2.new(0, 0))
+        task.wait(0.05)
+        VU:Button1Up(Vector2.new(0, 0))
     end)
 end
 
--- Main steal flow
+-- ============================================================
+--  STEAL RARITY FLOW
+-- ============================================================
 local function stealRarity(rarity)
     if stealing then return end
     stealing = true
 
-    -- 1. Find the closest egg of that rarity
     local target, targetPos = nil, nil
     local hrp = getHRP()
     if not hrp then stealing = false; return end
 
-    eggList = collectEggs() -- refresh
+    eggList = collectEggs()
     local bestDist = math.huge
     for _, e in ipairs(eggList) do
         if e.rarity == rarity and e.position then
@@ -351,15 +367,19 @@ local function stealRarity(rarity)
         return
     end
 
-    -- 2. Teleport to the egg
-    tpTo(targetPos + Vector3.new(0, 3, 0))
+    -- Teleport to egg
+    tpTo(targetPos + Vector3.new(0, 2, 0))
+
+    -- Wait for prompt to appear
     task.wait(holdTime)
 
-    -- 3. Try to pick it up
+    -- Try to pick up (6 methods)
     tryPickup(target)
+
+    -- Wait for server to process
     task.wait(returnDelay)
 
-    -- 4. Return to plot
+    -- Return to plot
     local plotPos = getPlotPosition()
     if plotPos then
         tpTo(plotPos)
@@ -368,7 +388,7 @@ local function stealRarity(rarity)
     stealing = false
 end
 
--- Loop
+-- Main loop
 task.spawn(function()
     while task.wait(0.5) do
         if autoStealEnabled and selectedRarity and not stealing then
@@ -382,7 +402,6 @@ end)
 -- ============================================================
 task.spawn(function()
     while task.wait(5) do
-        -- Refresh rarity list every 5 seconds if dropdown is set
         if not selectedRarity then
             local rarities = getAvailableRarities()
             pcall(function() rarityDropdown:Refresh(rarities) end)
