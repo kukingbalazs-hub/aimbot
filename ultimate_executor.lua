@@ -1,5 +1,5 @@
 -- ============================================================
---  STEAL A FISH EGG - FishEggs Script
+--  STEAL A FISH EGG - Javított (SunkenRuins, VolcanicSea, SpawnedEggs)
 --  Rayfield GUI - Delta Executor kompatibilis
 -- ============================================================
 
@@ -10,7 +10,7 @@ local RunService = game:GetService("RunService")
 local LocalPlayer = Players.LocalPlayer
 
 local Window = Rayfield:CreateWindow({
-    Name = "Steal A Fish Egg - FishEggs",
+    Name = "Steal A Fish Egg - Javított",
     LoadingTitle = "Betöltés...",
     LoadingSubtitle = "by Te",
     ConfigurationSaving = { Enabled = false }
@@ -92,42 +92,53 @@ LocalPlayer.CharacterAdded:Connect(function(char)
 end)
 
 -- ============================================================
---  FISHEGGS GYŰJTÉS
+--  FISHEGGS GYŰJTÉS (JAVÍTOTT)
 -- ============================================================
 local eggList = {}
 local eggDropdown
 
+-- Ezekben a mappákban keressük a tojásokat
+local VALID_PARENT_FOLDERS = {
+    "SpawnedEggs", 
+    "DroppedFishEggs", 
+    "PlacedEggs", 
+    "EggSpawns", 
+    "FishEggs",
+    "CarriedEggs" -- Ha a földön vannak, vagy épp viszik
+}
+
 local function collectFishEggs()
     local eggs = {}
-    local fishEggsFolder = game.Workspace:FindFirstChild("FishEggs")
     
-    -- Ha nincs közvetlenül a Workspace-ben, megkeressük máshol
-    if not fishEggsFolder then
-        for _, obj in ipairs(game.Workspace:GetDescendants()) do
-            if obj.Name == "FishEggs" then
-                fishEggsFolder = obj
-                break
-            end
-        end
-    end
-
-    if fishEggsFolder then
-        for _, obj in ipairs(fishEggsFolder:GetDescendants()) do
-            if obj:IsA("Model") or obj:IsA("BasePart") then
-                if obj.Name:lower():find("egg") then
-                    -- Ellenőrizzük, hogy van-e benne ProximityPrompt (PromptIndividualEggSkip)
-                    local hasPrompt = false
-                    if obj:IsA("BasePart") then
-                        if obj:FindFirstChildOfClass("ProximityPrompt") then hasPrompt = true end
-                    else
-                        if obj:FindFirstChildWhichIsA("ProximityPrompt", true) then hasPrompt = true end
-                    end
-                    
-                    -- Csak akkor adjuk hozzá, ha van promptja, vagy a neve pontosan "Egg"
-                    if hasPrompt or obj.Name:lower() == "egg" then
-                        table.insert(eggs, obj)
+    for _, obj in ipairs(game.Workspace:GetDescendants()) do
+        -- Csak Model vagy BasePart, és a nevében legyen "egg"
+        if (obj:IsA("Model") or obj:IsA("BasePart")) and obj.Name:lower():find("egg") then
+            
+            -- Ellenőrizzük, hogy a szülő mappája a fenti listában van-e
+            local parent = obj.Parent
+            local isValid = false
+            
+            while parent and parent ~= game.Workspace do
+                for _, folderName in ipairs(VALID_PARENT_FOLDERS) do
+                    if parent.Name == folderName then
+                        isValid = true
+                        break
                     end
                 end
+                if isValid then break end
+                parent = parent.Parent
+            end
+            
+            -- Ha nincs a mappákban, de van ProximityPrompt-ja, akkor is felvesszük
+            if not isValid then
+                local prompt = obj:FindFirstChildWhichIsA("ProximityPrompt", true)
+                if prompt and (prompt.Name:lower():find("egg") or prompt.Name == "PromptIndividualEggSkip") then
+                    isValid = true
+                end
+            end
+            
+            if isValid then
+                table.insert(eggs, obj)
             end
         end
     end
@@ -162,7 +173,7 @@ end
 local autoStealEnabled = false
 
 EggsTab:CreateToggle({
-    Name = "Auto Steal (PromptIndividualEggSkip)",
+    Name = "Auto Steal (Prompt aktiválás)",
     CurrentValue = false,
     Flag = "AutoStealToggle",
     Callback = function(value)
@@ -298,6 +309,6 @@ end)
 
 Rayfield:Notify({
     Title = "Betöltve!",
-    Content = "FishEggs script aktív. Refresh, majd válassz tojást!",
+    Content = "Javított FishEggs script aktív. Refresh, majd válassz tojást!",
     Duration = 5
 })
