@@ -1,5 +1,5 @@
 -- ============================================================
---  KUKING HUB - Steal A Fish Egg (Rarity Auto Steal)
+--  KUKING HUB - Steal A Fish Egg (Rarity Auto Steal v3)
 --  Rayfield GUI - Delta Executor compatible
 -- ============================================================
 
@@ -304,59 +304,102 @@ local function tpTo(pos)
 end
 
 -- ============================================================
---  TRY PICKUP (6 METHODS)
+--  TRY PICKUP v2 (7 METHODS + PROMPT MODIFICATION)
 -- ============================================================
 local function tryPickup(eggInstance)
-    local prompt = eggInstance:FindFirstChildWhichIsA("ProximityPrompt", true)
+    local prompts = {}
+    for _, d in ipairs(eggInstance:GetDescendants()) do
+        if d:IsA("ProximityPrompt") then
+            table.insert(prompts, d)
+        end
+    end
 
-    if prompt then
+    if #prompts == 0 then
+        print("[Kuking] No prompts on "..eggInstance.Name)
+        pcall(function()
+            local VIM = game:GetService("VirtualInputManager")
+            VIM:SendKeyEvent(true, Enum.KeyCode.E, false, game)
+            task.wait(0.05)
+            VIM:SendKeyEvent(false, Enum.KeyCode.E, false, game)
+        end)
+        return
+    end
+
+    for _, prompt in ipairs(prompts) do
+        -- 1. Modify prompt properties
+        pcall(function()
+            prompt.MaxActivationDistance = 100
+            prompt.RequiresLineOfSight = false
+            prompt.HoldDuration = 0
+            prompt.Enabled = true
+        end)
+
+        task.wait(0.05)
+
+        -- 2. Enabled toggle (reset)
+        pcall(function()
+            prompt.Enabled = false
+            task.wait(0.05)
+            prompt.Enabled = true
+        end)
+
+        -- 3. fireproximityprompt
         pcall(function() fireproximityprompt(prompt) end)
 
+        -- 4. fireproximityprompt with holdDuration override
+        pcall(function() fireproximityprompt(prompt, 0) end)
+
+        -- 5. InputHold Begin/End
         pcall(function()
             prompt:InputHoldBegin()
-            task.wait(prompt.HoldDuration > 0 and prompt.HoldDuration + 0.1 or 0.3)
+            task.wait(0.2)
             prompt:InputHoldEnd()
         end)
 
+        -- 6. InputPressed / InputReleased
         pcall(function()
             prompt:InputPressed()
-            task.wait(0.15)
+            task.wait(0.1)
             prompt:InputReleased()
         end)
 
-        pcall(function() fireproximityprompt(prompt) end)
+        task.wait(0.05)
     end
 
+    -- 7. Real E key simulation
     pcall(function()
         local VIM = game:GetService("VirtualInputManager")
         VIM:SendKeyEvent(true, Enum.KeyCode.E, false, game)
-        task.wait(0.05)
+        task.wait(0.08)
         VIM:SendKeyEvent(false, Enum.KeyCode.E, false, game)
-    end)
-
-    pcall(function()
-        local VU = game:GetService("VirtualUser")
-        VU:Button1Down(Vector2.new(0, 0))
-        task.wait(0.05)
-        VU:Button1Up(Vector2.new(0, 0))
     end)
 end
 
 -- ============================================================
---  STEAL RARITY FLOW (line-of-sight fix)
+--  STEAL RARITY FLOW v2 (4-direction, prompt-based)
 -- ============================================================
 local function stealRarity(rarity)
     if stealing then return end
     stealing = true
 
-    local target, targetPos = nil, nil
     local hrp = getHRP()
     if not hrp then stealing = false; return end
 
     eggList = collectEggs()
-    local bestDist = math.huge
+
+    local rarityMatches = {}
     for _, e in ipairs(eggList) do
         if e.rarity == rarity and e.position then
+            table.insert(rarityMatches, e)
+        end
+    end
+
+    local candidates = (#rarityMatches > 0) and rarityMatches or eggList
+
+    local target, targetPos = nil, nil
+    local bestDist = math.huge
+    for _, e in ipairs(candidates) do
+        if e.position then
             local d = (e.position - hrp.Position).Magnitude
             if d < bestDist then
                 bestDist = d
@@ -367,12 +410,12 @@ local function stealRarity(rarity)
     end
 
     if not target or not targetPos then
-        Rayfield:Notify({Title="Auto Steal", Content="No egg found with rarity: "..rarity, Duration=3})
+        Rayfield:Notify({Title="Auto Steal", Content="No egg found.", Duration=3})
         stealing = false
         return
     end
 
-    -- DIAGNOSTIC
+    -- Diagnostic output
     local prompt = target:FindFirstChildWhichIsA("ProximityPrompt", true)
     if prompt then
         print("=== PROMPT DEBUG ===")
@@ -385,28 +428,36 @@ local function stealRarity(rarity)
         print("ObjectText:", prompt.ObjectText)
         print("====================")
     else
-        print("[Auto Steal] No ProximityPrompt found on target: "..target.Name)
+        print("[Kuking] No ProximityPrompt found on target: "..target.Name)
     end
 
-    -- Teleport BESIDE the egg (not on top of it) so line-of-sight works
-    local offset = Vector3.new(sideOffset, 0, 0)
-    local sidePos = targetPos + offset
+    -- Try 4 sides
+    local offsets = {
+        Vector3.new(sideOffset, 0, 0),
+        Vector3.new(-sideOffset, 0, 0),
+        Vector3.new(0, 0, sideOffset),
+        Vector3.new(0, 0, -sideOffset),
+    }
 
-    tpTo(sidePos)
-    task.wait(0.15)
+    for i, off in ipairs(offsets) do
+        local sidePos = targetPos + off
+        tpTo(sidePos)
+        task.wait(0.15)
+        if hrp then
+            hrp.CFrame = CFrame.new(sidePos, targetPos)
+        end
+        task.wait(holdTime)
 
-    -- Look at the egg
-    if hrp then
-        hrp.CFrame = CFrame.new(sidePos, targetPos)
+        tryPickup(target)
+
+        task.wait(0.15)
+        if not target.Parent then
+            break
+        end
     end
-
-    task.wait(holdTime)
-
-    tryPickup(target)
 
     task.wait(returnDelay)
 
-    -- Return to plot
     local plotPos = getPlotPosition()
     if plotPos then
         tpTo(plotPos)
