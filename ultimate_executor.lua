@@ -1,5 +1,5 @@
 -- ============================================================
---  KUKING HUB - Steal A Fish Egg (v4 - Camera Fix)
+--  KUKING HUB - Steal A Fish Egg (v5 - Semi-Auto + Auto)
 --  Rayfield GUI - Delta Executor compatible
 -- ============================================================
 
@@ -230,24 +230,24 @@ EggsTab:CreateButton({
     end
 })
 
-local holdTime = 0.3
+local holdTime = 0.5
 EggsTab:CreateSlider({
-    Name = "Pickup Delay (sec)",
-    Range = {0.1, 2},
+    Name = "Arrival Wait (sec)",
+    Range = {0.1, 3},
     Increment = 0.1,
     Suffix = "s",
-    CurrentValue = 0.3,
+    CurrentValue = 0.5,
     Flag = "HoldTimeSlider",
     Callback = function(value) holdTime = value end,
 })
 
-local returnDelay = 0.8
+local returnDelay = 1.0
 EggsTab:CreateSlider({
     Name = "Return to Plot Delay (sec)",
-    Range = {0.1, 3},
+    Range = {0.1, 5},
     Increment = 0.1,
     Suffix = "s",
-    CurrentValue = 0.8,
+    CurrentValue = 1.0,
     Flag = "ReturnDelaySlider",
     Callback = function(value) returnDelay = value end,
 })
@@ -264,72 +264,25 @@ EggsTab:CreateSlider({
 })
 
 -- ============================================================
---  INPUT SIMULATION (multiple methods)
+--  STEAL MODE SELECTION
 -- ============================================================
-local function simulateEKey()
-    -- Method 1: VirtualInputManager (most universal)
-    pcall(function()
-        local VIM = game:GetService("VirtualInputManager")
-        VIM:SendKeyEvent(true, Enum.KeyCode.E, false, game)
-        task.wait(0.05)
-        VIM:SendKeyEvent(false, Enum.KeyCode.E, false, game)
-    end)
+local semiAutoMode = true -- Default: semi-auto (manual E press)
 
-    -- Method 2: keypress/keyrelease (executor-specific)
-    pcall(function() keypress(0x45) end)
-    task.wait(0.05)
-    pcall(function() keyrelease(0x45) end)
+EggsTab:CreateSection("Steal Mode")
 
-    -- Method 3: Longer hold
-    pcall(function()
-        local VIM = game:GetService("VirtualInputManager")
-        VIM:SendKeyEvent(true, Enum.KeyCode.E, false, game)
-        task.wait(0.15)
-        VIM:SendKeyEvent(false, Enum.KeyCode.E, false, game)
-    end)
-end
-
--- ============================================================
---  TRY PICKUP
--- ============================================================
-local function tryPickup(eggInstance)
-    local prompts = {}
-    for _, d in ipairs(eggInstance:GetDescendants()) do
-        if d:IsA("ProximityPrompt") then
-            table.insert(prompts, d)
+EggsTab:CreateToggle({
+    Name = "Semi-Auto Mode (you press E)",
+    CurrentValue = true,
+    Flag = "SemiAutoToggle",
+    Callback = function(value)
+        semiAutoMode = value
+        if value then
+            Rayfield:Notify({Title="Mode", Content="SEMI-AUTO: You press E manually.", Duration=3})
+        else
+            Rayfield:Notify({Title="Mode", Content="AUTO: Script tries to press E.", Duration=3})
         end
     end
-
-    for _, prompt in ipairs(prompts) do
-        -- Force enable + bypass checks
-        pcall(function()
-            prompt.MaxActivationDistance = 100
-            prompt.RequiresLineOfSight = false
-            prompt.HoldDuration = 0
-            prompt.Enabled = true
-        end)
-        task.wait(0.05)
-
-        -- fireproximityprompt
-        pcall(function() fireproximityprompt(prompt) end)
-        task.wait(0.05)
-
-        -- Input methods
-        pcall(function()
-            prompt:InputHoldBegin()
-            task.wait(0.1)
-            prompt:InputHoldEnd()
-        end)
-        pcall(function()
-            prompt:InputPressed()
-            task.wait(0.05)
-            prompt:InputReleased()
-        end)
-    end
-
-    -- Simulate E key (last resort)
-    simulateEKey()
-end
+})
 
 -- ============================================================
 --  AUTO STEAL LOOP
@@ -347,12 +300,62 @@ EggsTab:CreateToggle({
     end
 })
 
--- Teleport + rotate camera to look at target
+-- ============================================================
+--  TRY PICKUP (all methods)
+-- ============================================================
+local function tryPickup(eggInstance)
+    local prompts = {}
+    for _, d in ipairs(eggInstance:GetDescendants()) do
+        if d:IsA("ProximityPrompt") then
+            table.insert(prompts, d)
+        end
+    end
+
+    for _, prompt in ipairs(prompts) do
+        pcall(function()
+            prompt.MaxActivationDistance = 100
+            prompt.RequiresLineOfSight = false
+            prompt.HoldDuration = 0
+            prompt.Enabled = true
+        end)
+        task.wait(0.05)
+
+        pcall(function() fireproximityprompt(prompt) end)
+        task.wait(0.05)
+
+        pcall(function()
+            prompt:InputHoldBegin()
+            task.wait(0.15)
+            prompt:InputHoldEnd()
+        end)
+        pcall(function()
+            prompt:InputPressed()
+            task.wait(0.1)
+            prompt:InputReleased()
+        end)
+    end
+
+    -- VirtualInputManager E key
+    pcall(function()
+        local VIM = game:GetService("VirtualInputManager")
+        VIM:SendKeyEvent(true, Enum.KeyCode.E, false, game)
+        task.wait(0.1)
+        VIM:SendKeyEvent(false, Enum.KeyCode.E, false, game)
+    end)
+
+    -- keypress/keyrelease (executor)
+    pcall(function() keypress(0x45) end)
+    task.wait(0.1)
+    pcall(function() keyrelease(0x45) end)
+end
+
+-- ============================================================
+--  TELEPORT + LOOK AT TARGET
+-- ============================================================
 local function tpAndLookAt(targetPos)
     local hrp = getHRP()
     if not hrp then return end
 
-    -- Position beside the egg
     local direction = (hrp.Position - targetPos)
     direction = Vector3.new(direction.X, 0, direction.Z).Unit
     if direction.Magnitude < 0.01 then
@@ -360,10 +363,8 @@ local function tpAndLookAt(targetPos)
     end
     local standPos = targetPos + direction * sideOffset + Vector3.new(0, 2, 0)
 
-    -- Move character
     hrp.CFrame = CFrame.new(standPos, targetPos)
 
-    -- ALSO move camera to look at egg (CRITICAL for line-of-sight)
     local camera = game.Workspace.CurrentCamera
     if camera then
         camera.CFrame = CFrame.new(camera.CFrame.Position, targetPos)
@@ -414,12 +415,21 @@ local function stealRarity(rarity)
     tpAndLookAt(targetPos)
     task.wait(holdTime)
 
-    -- Pickup
-    tryPickup(target)
-    task.wait(0.2)
-    tryPickup(target)
-
-    task.wait(returnDelay)
+    if semiAutoMode then
+        -- SEMI-AUTO: tell user to press E
+        Rayfield:Notify({
+            Title = "🎯 Press E NOW!",
+            Content = target.Name .. " - Press E to steal!",
+            Duration = returnDelay + 1
+        })
+        task.wait(returnDelay)
+    else
+        -- AUTO: try all methods
+        tryPickup(target)
+        task.wait(0.2)
+        tryPickup(target)
+        task.wait(returnDelay - 0.2)
+    end
 
     -- Return to plot
     local plotPos = getPlotPosition()
@@ -432,7 +442,7 @@ local function stealRarity(rarity)
 end
 
 task.spawn(function()
-    while task.wait(0.5) do
+    while task.wait(0.3) do
         if autoStealEnabled and selectedRarity and not stealing then
             stealRarity(selectedRarity)
         end
@@ -459,6 +469,6 @@ end)
 
 Rayfield:Notify({
     Title = "Kuking Hub",
-    Content = "Loaded! Camera-fix version. Select rarity, enable Auto Steal.",
+    Content = "Loaded! SEMI-AUTO mode default - you press E.",
     Duration = 5
 })
