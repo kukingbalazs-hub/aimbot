@@ -1,5 +1,5 @@
 -- ============================================================
---  STEAL A FISH EGG - Javított (SunkenRuins, VolcanicSea, SpawnedEggs)
+--  STEAL A FISH EGG - Végleges Javított (SpawnedEggs alapján)
 --  Rayfield GUI - Delta Executor kompatibilis
 -- ============================================================
 
@@ -10,7 +10,7 @@ local RunService = game:GetService("RunService")
 local LocalPlayer = Players.LocalPlayer
 
 local Window = Rayfield:CreateWindow({
-    Name = "Steal A Fish Egg - Javított",
+    Name = "Steal A Fish Egg - Végleges",
     LoadingTitle = "Betöltés...",
     LoadingSubtitle = "by Te",
     ConfigurationSaving = { Enabled = false }
@@ -92,53 +92,48 @@ LocalPlayer.CharacterAdded:Connect(function(char)
 end)
 
 -- ============================================================
---  FISHEGGS GYŰJTÉS (JAVÍTOTT)
+--  FISHEGGS GYŰJTÉS (VÉGLEGES JAVÍTÁS)
 -- ============================================================
 local eggList = {}
 local eggDropdown
 
--- Ezekben a mappákban keressük a tojásokat
-local VALID_PARENT_FOLDERS = {
-    "SpawnedEggs", 
-    "DroppedFishEggs", 
-    "PlacedEggs", 
-    "EggSpawns", 
-    "FishEggs",
-    "CarriedEggs" -- Ha a földön vannak, vagy épp viszik
+-- Ezekben a mappákban keressük a tojásokat (közvetlenül a mappában lévő Model/BasePart)
+local VALID_EGG_FOLDERS = {
+    "SpawnedEggs",
+    "PlacedEggs",
+    "DroppedFishEggs",
+    "CarriedEggs",
+    "EggSpawns",
+    "FishEggs"
 }
+
+local function getPositionFromInstance(inst)
+    if inst:IsA("BasePart") then
+        return inst.Position
+    elseif inst:IsA("Model") then
+        local primary = inst.PrimaryPart or inst:FindFirstChildWhichIsA("BasePart")
+        if primary then return primary.Position end
+    end
+    local part = inst:FindFirstChildWhichIsA("BasePart", true)
+    if part then return part.Position end
+    return nil
+end
 
 local function collectFishEggs()
     local eggs = {}
+    local seen = {}
     
+    -- Végigmegyünk az egész Workspace-en, és megkeressük a fenti nevű mappákat
     for _, obj in ipairs(game.Workspace:GetDescendants()) do
-        -- Csak Model vagy BasePart, és a nevében legyen "egg"
-        if (obj:IsA("Model") or obj:IsA("BasePart")) and obj.Name:lower():find("egg") then
-            
-            -- Ellenőrizzük, hogy a szülő mappája a fenti listában van-e
-            local parent = obj.Parent
-            local isValid = false
-            
-            while parent and parent ~= game.Workspace do
-                for _, folderName in ipairs(VALID_PARENT_FOLDERS) do
-                    if parent.Name == folderName then
-                        isValid = true
-                        break
+        for _, folderName in ipairs(VALID_EGG_FOLDERS) do
+            if obj.Name == folderName then
+                -- Megvan a mappa! Most végigmegyünk a gyerekein
+                for _, child in ipairs(obj:GetChildren()) do
+                    if (child:IsA("Model") or child:IsA("BasePart")) and not seen[child] then
+                        seen[child] = true
+                        table.insert(eggs, child)
                     end
                 end
-                if isValid then break end
-                parent = parent.Parent
-            end
-            
-            -- Ha nincs a mappákban, de van ProximityPrompt-ja, akkor is felvesszük
-            if not isValid then
-                local prompt = obj:FindFirstChildWhichIsA("ProximityPrompt", true)
-                if prompt and (prompt.Name:lower():find("egg") or prompt.Name == "PromptIndividualEggSkip") then
-                    isValid = true
-                end
-            end
-            
-            if isValid then
-                table.insert(eggs, obj)
             end
         end
     end
@@ -187,17 +182,9 @@ RunService.Heartbeat:Connect(function()
     local hrp = getHRP()
     if not hrp then return end
 
-    -- Megkeressük a legközelebbi tojást
     local closest, minDist = nil, math.huge
     for _, egg in ipairs(eggList) do
-        local eggPos
-        if egg:IsA("BasePart") then
-            eggPos = egg.Position
-        else
-            local part = egg:FindFirstChildWhichIsA("BasePart", true)
-            if part then eggPos = part.Position end
-        end
-        
+        local eggPos = getPositionFromInstance(egg)
         if eggPos then
             local d = (eggPos - hrp.Position).Magnitude
             if d < minDist then 
@@ -209,18 +196,9 @@ RunService.Heartbeat:Connect(function()
 
     -- Ha elég közel van (20 stud), aktiváljuk a promptot
     if closest and minDist < 20 then
-        local prompt
-        if closest:IsA("BasePart") then
-            prompt = closest:FindFirstChildOfClass("ProximityPrompt")
-        else
-            prompt = closest:FindFirstChildWhichIsA("ProximityPrompt", true)
-        end
-        
+        local prompt = closest:FindFirstChildWhichIsA("ProximityPrompt", true)
         if prompt then
-            -- Prompt aktiválása (több módszerrel, hogy működjön)
-            pcall(function()
-                fireproximityprompt(prompt)
-            end)
+            pcall(function() fireproximityprompt(prompt) end)
             pcall(function()
                 prompt:InputHoldBegin()
                 task.wait(0.1)
@@ -245,13 +223,7 @@ eggDropdown = EggsTab:CreateDropdown({
         
         for _, e in ipairs(eggList) do
             if e.displayName == chosen then
-                local pos
-                if e:IsA("BasePart") then pos = e.Position
-                else
-                    local part = e:FindFirstChildWhichIsA("BasePart", true)
-                    if part then pos = part.Position end
-                end
-                
+                local pos = getPositionFromInstance(e)
                 if pos then
                     teleportTo(pos)
                     Rayfield:Notify({Title="Teleport", Content="Odamentél: "..e.Name, Duration=2})
@@ -277,13 +249,7 @@ EggsTab:CreateButton({
         
         local closest, minDist = nil, math.huge
         for _, egg in ipairs(eggList) do
-            local eggPos
-            if egg:IsA("BasePart") then eggPos = egg.Position
-            else
-                local part = egg:FindFirstChildWhichIsA("BasePart", true)
-                if part then eggPos = part.Position end
-            end
-            
+            local eggPos = getPositionFromInstance(egg)
             if eggPos then
                 local d = (eggPos - hrp.Position).Magnitude
                 if d < minDist then minDist = d; closest = eggPos end
@@ -309,6 +275,6 @@ end)
 
 Rayfield:Notify({
     Title = "Betöltve!",
-    Content = "Javított FishEggs script aktív. Refresh, majd válassz tojást!",
+    Content = "Végleges FishEggs script aktív. Refresh, majd válassz tojást!",
     Duration = 5
 })
