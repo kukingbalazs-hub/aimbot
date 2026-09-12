@@ -1,5 +1,5 @@
 -- ============================================================
---  KUKING HUB - Steal A Fish Egg (Rarity Auto Steal v3)
+--  KUKING HUB - Steal A Fish Egg (v4 - Camera Fix)
 --  Rayfield GUI - Delta Executor compatible
 -- ============================================================
 
@@ -7,6 +7,7 @@ local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
 local LocalPlayer = Players.LocalPlayer
 
 local Window = Rayfield:CreateWindow({
@@ -42,21 +43,16 @@ end
 local function getEggRarity(egg)
     local attr = egg:GetAttribute("Rarity")
     if attr then return tostring(attr) end
-
     local rarityVal = egg:FindFirstChild("Rarity") or egg:FindFirstChild("RarityValue")
     if rarityVal then
         if rarityVal:IsA("StringValue") then return rarityVal.Value end
         if rarityVal:IsA("ObjectValue") and rarityVal.Value then return rarityVal.Value.Name end
     end
-
     local name = egg.Name
     local knownRarities = {"Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythic", "Secret", "Godly", "Divine"}
     for _, r in ipairs(knownRarities) do
-        if name:lower():find(r:lower(), 1, true) then
-            return r
-        end
+        if name:lower():find(r:lower(), 1, true) then return r end
     end
-
     return "Unknown"
 end
 
@@ -72,7 +68,6 @@ local function getPlotPosition()
             if part then return part.Position + Vector3.new(0, 5, 0) end
         end
     end
-
     local pname = LocalPlayer.Name
     local named = game.Workspace:FindFirstChild(pname .. "Plot")
         or game.Workspace:FindFirstChild(pname .. "'s Plot")
@@ -81,7 +76,6 @@ local function getPlotPosition()
         local part = named:IsA("BasePart") and named or named:FindFirstChildWhichIsA("BasePart", true)
         if part then return part.Position + Vector3.new(0, 5, 0) end
     end
-
     for _, obj in ipairs(game.Workspace:GetDescendants()) do
         local n = obj.Name:lower()
         if n:find("plot") or n:find("base") then
@@ -98,12 +92,10 @@ local function getPlotPosition()
             end
         end
     end
-
     local spawn = game.Workspace:FindFirstChild("SpawnLocation")
     if spawn and spawn:IsA("BasePart") then
         return spawn.Position + Vector3.new(0, 5, 0)
     end
-
     return nil
 end
 
@@ -238,24 +230,13 @@ EggsTab:CreateButton({
     end
 })
 
-local stealRange = 15
-EggsTab:CreateSlider({
-    Name = "Pickup Distance",
-    Range = {5, 30},
-    Increment = 1,
-    Suffix = "studs",
-    CurrentValue = 15,
-    Flag = "StealRangeSlider",
-    Callback = function(value) stealRange = value end,
-})
-
-local holdTime = 0.4
+local holdTime = 0.3
 EggsTab:CreateSlider({
     Name = "Pickup Delay (sec)",
     Range = {0.1, 2},
     Increment = 0.1,
     Suffix = "s",
-    CurrentValue = 0.4,
+    CurrentValue = 0.3,
     Flag = "HoldTimeSlider",
     Callback = function(value) holdTime = value end,
 })
@@ -271,16 +252,84 @@ EggsTab:CreateSlider({
     Callback = function(value) returnDelay = value end,
 })
 
-local sideOffset = 5
+local sideOffset = 4
 EggsTab:CreateSlider({
-    Name = "Side Offset (studs)",
-    Range = {2, 15},
+    Name = "Stand Distance (studs)",
+    Range = {2, 10},
     Increment = 1,
     Suffix = "studs",
-    CurrentValue = 5,
+    CurrentValue = 4,
     Flag = "SideOffsetSlider",
     Callback = function(value) sideOffset = value end,
 })
+
+-- ============================================================
+--  INPUT SIMULATION (multiple methods)
+-- ============================================================
+local function simulateEKey()
+    -- Method 1: VirtualInputManager (most universal)
+    pcall(function()
+        local VIM = game:GetService("VirtualInputManager")
+        VIM:SendKeyEvent(true, Enum.KeyCode.E, false, game)
+        task.wait(0.05)
+        VIM:SendKeyEvent(false, Enum.KeyCode.E, false, game)
+    end)
+
+    -- Method 2: keypress/keyrelease (executor-specific)
+    pcall(function() keypress(0x45) end)
+    task.wait(0.05)
+    pcall(function() keyrelease(0x45) end)
+
+    -- Method 3: Longer hold
+    pcall(function()
+        local VIM = game:GetService("VirtualInputManager")
+        VIM:SendKeyEvent(true, Enum.KeyCode.E, false, game)
+        task.wait(0.15)
+        VIM:SendKeyEvent(false, Enum.KeyCode.E, false, game)
+    end)
+end
+
+-- ============================================================
+--  TRY PICKUP
+-- ============================================================
+local function tryPickup(eggInstance)
+    local prompts = {}
+    for _, d in ipairs(eggInstance:GetDescendants()) do
+        if d:IsA("ProximityPrompt") then
+            table.insert(prompts, d)
+        end
+    end
+
+    for _, prompt in ipairs(prompts) do
+        -- Force enable + bypass checks
+        pcall(function()
+            prompt.MaxActivationDistance = 100
+            prompt.RequiresLineOfSight = false
+            prompt.HoldDuration = 0
+            prompt.Enabled = true
+        end)
+        task.wait(0.05)
+
+        -- fireproximityprompt
+        pcall(function() fireproximityprompt(prompt) end)
+        task.wait(0.05)
+
+        -- Input methods
+        pcall(function()
+            prompt:InputHoldBegin()
+            task.wait(0.1)
+            prompt:InputHoldEnd()
+        end)
+        pcall(function()
+            prompt:InputPressed()
+            task.wait(0.05)
+            prompt:InputReleased()
+        end)
+    end
+
+    -- Simulate E key (last resort)
+    simulateEKey()
+end
 
 -- ============================================================
 --  AUTO STEAL LOOP
@@ -298,85 +347,31 @@ EggsTab:CreateToggle({
     end
 })
 
-local function tpTo(pos)
+-- Teleport + rotate camera to look at target
+local function tpAndLookAt(targetPos)
     local hrp = getHRP()
-    if hrp then hrp.CFrame = CFrame.new(pos) end
+    if not hrp then return end
+
+    -- Position beside the egg
+    local direction = (hrp.Position - targetPos)
+    direction = Vector3.new(direction.X, 0, direction.Z).Unit
+    if direction.Magnitude < 0.01 then
+        direction = Vector3.new(1, 0, 0)
+    end
+    local standPos = targetPos + direction * sideOffset + Vector3.new(0, 2, 0)
+
+    -- Move character
+    hrp.CFrame = CFrame.new(standPos, targetPos)
+
+    -- ALSO move camera to look at egg (CRITICAL for line-of-sight)
+    local camera = game.Workspace.CurrentCamera
+    if camera then
+        camera.CFrame = CFrame.new(camera.CFrame.Position, targetPos)
+    end
 end
 
 -- ============================================================
---  TRY PICKUP v2 (7 METHODS + PROMPT MODIFICATION)
--- ============================================================
-local function tryPickup(eggInstance)
-    local prompts = {}
-    for _, d in ipairs(eggInstance:GetDescendants()) do
-        if d:IsA("ProximityPrompt") then
-            table.insert(prompts, d)
-        end
-    end
-
-    if #prompts == 0 then
-        print("[Kuking] No prompts on "..eggInstance.Name)
-        pcall(function()
-            local VIM = game:GetService("VirtualInputManager")
-            VIM:SendKeyEvent(true, Enum.KeyCode.E, false, game)
-            task.wait(0.05)
-            VIM:SendKeyEvent(false, Enum.KeyCode.E, false, game)
-        end)
-        return
-    end
-
-    for _, prompt in ipairs(prompts) do
-        -- 1. Modify prompt properties
-        pcall(function()
-            prompt.MaxActivationDistance = 100
-            prompt.RequiresLineOfSight = false
-            prompt.HoldDuration = 0
-            prompt.Enabled = true
-        end)
-
-        task.wait(0.05)
-
-        -- 2. Enabled toggle (reset)
-        pcall(function()
-            prompt.Enabled = false
-            task.wait(0.05)
-            prompt.Enabled = true
-        end)
-
-        -- 3. fireproximityprompt
-        pcall(function() fireproximityprompt(prompt) end)
-
-        -- 4. fireproximityprompt with holdDuration override
-        pcall(function() fireproximityprompt(prompt, 0) end)
-
-        -- 5. InputHold Begin/End
-        pcall(function()
-            prompt:InputHoldBegin()
-            task.wait(0.2)
-            prompt:InputHoldEnd()
-        end)
-
-        -- 6. InputPressed / InputReleased
-        pcall(function()
-            prompt:InputPressed()
-            task.wait(0.1)
-            prompt:InputReleased()
-        end)
-
-        task.wait(0.05)
-    end
-
-    -- 7. Real E key simulation
-    pcall(function()
-        local VIM = game:GetService("VirtualInputManager")
-        VIM:SendKeyEvent(true, Enum.KeyCode.E, false, game)
-        task.wait(0.08)
-        VIM:SendKeyEvent(false, Enum.KeyCode.E, false, game)
-    end)
-end
-
--- ============================================================
---  STEAL RARITY FLOW v2 (4-direction, prompt-based)
+--  STEAL FLOW
 -- ============================================================
 local function stealRarity(rarity)
     if stealing then return end
@@ -415,58 +410,27 @@ local function stealRarity(rarity)
         return
     end
 
-    -- Diagnostic output
-    local prompt = target:FindFirstChildWhichIsA("ProximityPrompt", true)
-    if prompt then
-        print("=== PROMPT DEBUG ===")
-        print("Name:", prompt.Name)
-        print("HoldDuration:", prompt.HoldDuration)
-        print("MaxActivationDistance:", prompt.MaxActivationDistance)
-        print("RequiresLineOfSight:", prompt.RequiresLineOfSight)
-        print("Enabled:", prompt.Enabled)
-        print("ActionText:", prompt.ActionText)
-        print("ObjectText:", prompt.ObjectText)
-        print("====================")
-    else
-        print("[Kuking] No ProximityPrompt found on target: "..target.Name)
-    end
+    -- Teleport + rotate camera
+    tpAndLookAt(targetPos)
+    task.wait(holdTime)
 
-    -- Try 4 sides
-    local offsets = {
-        Vector3.new(sideOffset, 0, 0),
-        Vector3.new(-sideOffset, 0, 0),
-        Vector3.new(0, 0, sideOffset),
-        Vector3.new(0, 0, -sideOffset),
-    }
-
-    for i, off in ipairs(offsets) do
-        local sidePos = targetPos + off
-        tpTo(sidePos)
-        task.wait(0.15)
-        if hrp then
-            hrp.CFrame = CFrame.new(sidePos, targetPos)
-        end
-        task.wait(holdTime)
-
-        tryPickup(target)
-
-        task.wait(0.15)
-        if not target.Parent then
-            break
-        end
-    end
+    -- Pickup
+    tryPickup(target)
+    task.wait(0.2)
+    tryPickup(target)
 
     task.wait(returnDelay)
 
+    -- Return to plot
     local plotPos = getPlotPosition()
     if plotPos then
-        tpTo(plotPos)
+        local hrp2 = getHRP()
+        if hrp2 then hrp2.CFrame = CFrame.new(plotPos) end
     end
 
     stealing = false
 end
 
--- Main loop
 task.spawn(function()
     while task.wait(0.5) do
         if autoStealEnabled and selectedRarity and not stealing then
@@ -476,7 +440,7 @@ task.spawn(function()
 end)
 
 -- ============================================================
---  AUTO REFRESH DROPDOWN
+--  AUTO REFRESH
 -- ============================================================
 task.spawn(function()
     while task.wait(5) do
@@ -487,9 +451,6 @@ task.spawn(function()
     end
 end)
 
--- ============================================================
---  FIRST LOAD
--- ============================================================
 task.spawn(function()
     task.wait(1.5)
     local rarities = getAvailableRarities()
@@ -498,6 +459,6 @@ end)
 
 Rayfield:Notify({
     Title = "Kuking Hub",
-    Content = "Loaded! Select a rarity, then enable Auto Steal.",
+    Content = "Loaded! Camera-fix version. Select rarity, enable Auto Steal.",
     Duration = 5
 })
