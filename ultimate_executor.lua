@@ -1,5 +1,5 @@
 -- ============================================================
---  STEAL A FISH EGG - SpawnedEggs Auto-Refresh
+--  STEAL A FISH EGG - Auto Steal JAVÍTVA
 --  Rayfield GUI - Delta Executor kompatibilis
 -- ============================================================
 
@@ -10,7 +10,7 @@ local RunService = game:GetService("RunService")
 local LocalPlayer = Players.LocalPlayer
 
 local Window = Rayfield:CreateWindow({
-    Name = "Steal A Fish Egg - SpawnedEggs",
+    Name = "Steal A Fish Egg - Auto Steal",
     LoadingTitle = "Betöltés...",
     LoadingSubtitle = "by Te",
     ConfigurationSaving = { Enabled = false }
@@ -96,7 +96,6 @@ end)
 local eggList = {}
 local eggDropdown
 
--- Megkeresi a SpawnedEggs mappát a Workspace-ben
 local function findSpawnedEggs()
     local folder = game.Workspace:FindFirstChild("SpawnedEggs")
     if folder then return folder end
@@ -106,7 +105,6 @@ local function findSpawnedEggs()
     return nil
 end
 
--- Összegyűjti a tojásokat a SpawnedEggs mappából
 local function collectEggs()
     local eggs = {}
     local folder = findSpawnedEggs()
@@ -120,25 +118,17 @@ local function collectEggs()
     return eggs
 end
 
--- Frissíti a listát és a legördülő menüt
 local function refreshEggs()
     eggList = collectEggs()
     local names = {}
     for i, e in ipairs(eggList) do
         table.insert(names, e.Name)
     end
-    
-    if #names == 0 then 
-        names = { "Nincs spawnolt tojás" } 
-    end
-
+    if #names == 0 then names = { "Nincs spawnolt tojás" } end
     if eggDropdown then
-        pcall(function()
-            eggDropdown:Refresh(names)
-        end)
+        pcall(function() eggDropdown:Refresh(names) end)
     end
-    
-    Rayfield:Notify({Title="Refresh", Content=#eggList.." tojás a SpawnedEggs-ben.", Duration=3})
+    Rayfield:Notify({Title="Refresh", Content=#eggList.." tojás a SpawnedEggs-ben.", Duration=2})
 end
 
 -- ============================================================
@@ -153,7 +143,6 @@ eggDropdown = EggsTab:CreateDropdown({
     Callback = function(opt)
         local chosen = type(opt) == "table" and opt[1] or opt
         if not chosen or chosen == "Nincs spawnolt tojás" or chosen == "Kattints a Refresh-re" then return end
-        
         for _, e in ipairs(eggList) do
             if e.Name == chosen then
                 local pos = getPositionFromInstance(e)
@@ -163,8 +152,6 @@ eggDropdown = EggsTab:CreateDropdown({
                         hrp.CFrame = CFrame.new(pos + Vector3.new(0, 5, 0))
                         Rayfield:Notify({Title="Teleport", Content="Odamentél: "..e.Name, Duration=2})
                     end
-                else
-                    Rayfield:Notify({Title="Hiba", Content="Nincs pozíciója a tojásnak!", Duration=3})
                 end
                 return
             end
@@ -182,74 +169,104 @@ EggsTab:CreateButton({
     Callback = function()
         local hrp = getHRP()
         if not hrp then return end
-        
         local closest, minDist = nil, math.huge
         for _, egg in ipairs(eggList) do
             local eggPos = getPositionFromInstance(egg)
             if eggPos then
                 local d = (eggPos - hrp.Position).Magnitude
-                if d < minDist then 
-                    minDist = d
-                    closest = eggPos 
-                end
+                if d < minDist then minDist = d; closest = eggPos end
             end
         end
-        
         if closest then
             hrp.CFrame = CFrame.new(closest + Vector3.new(0, 5, 0))
             Rayfield:Notify({Title="Teleport", Content="Legközelebbi tojásnál vagy!", Duration=2})
-        else
-            Rayfield:Notify({Title="Hiba", Content="Nincs tojás a listában!", Duration=3})
         end
     end
 })
 
 -- ============================================================
---  AUTO STEAL
+--  AUTO STEAL (JAVÍTOTT - 3 MÓDSZER)
 -- ============================================================
 local autoStealEnabled = false
+local stealRange = 15
+
+EggsTab:CreateSection("Auto Steal")
 
 EggsTab:CreateToggle({
-    Name = "Auto Steal (Prompt aktiválás)",
+    Name = "Auto Steal BE/KI",
     CurrentValue = false,
     Flag = "AutoStealToggle",
     Callback = function(value)
         autoStealEnabled = value
+        Rayfield:Notify({Title="Auto Steal", Content=value and "BEKAPCSOLVA" or "KIKAPCSOLVA", Duration=2})
     end
 })
 
-RunService.Heartbeat:Connect(function()
-    if not autoStealEnabled then return end
-    local hrp = getHRP()
-    if not hrp then return end
-
-    local closest, minDist = nil, math.huge
-    for _, egg in ipairs(eggList) do
-        local eggPos = getPositionFromInstance(egg)
-        if eggPos then
-            local d = (eggPos - hrp.Position).Magnitude
-            if d < minDist then 
-                minDist = d
-                closest = egg 
-            end
-        end
+EggsTab:CreateSlider({
+    Name = "Steal távolság (stud)",
+    Range = {5, 50},
+    Increment = 1,
+    Suffix = "stud",
+    CurrentValue = 15,
+    Flag = "StealRangeSlider",
+    Callback = function(value)
+        stealRange = value
     end
+})
 
-    if closest and minDist < 15 then
-        local prompt = closest:FindFirstChildWhichIsA("ProximityPrompt", true)
-        if prompt then
-            pcall(function()
-                fireproximityprompt(prompt)
-                prompt:InputHoldBegin()
-                task.wait(0.1)
-                prompt:InputHoldEnd()
-            end)
+-- Auto Steal fő ciklus (külön szálon fut, nem akasztja a UI-t)
+task.spawn(function()
+    while task.wait(0.15) do
+        if autoStealEnabled then
+            local hrp = getHRP()
+            if hrp then
+                -- Legközelebbi tojás keresése
+                local closestEgg, minDist = nil, math.huge
+                for _, egg in ipairs(eggList) do
+                    local eggPos = getPositionFromInstance(egg)
+                    if eggPos then
+                        local d = (eggPos - hrp.Position).Magnitude
+                        if d < minDist then
+                            minDist = d
+                            closestEgg = egg
+                        end
+                    end
+                end
+
+                if closestEgg and minDist <= stealRange then
+                    -- ProximityPrompt keresése
+                    local prompt = closestEgg:FindFirstChildWhichIsA("ProximityPrompt", true)
+                    
+                    -- 1. MÓDSZER: fireproximityprompt (a legtöbb executor támogatja)
+                    if prompt then
+                        pcall(function()
+                            fireproximityprompt(prompt)
+                        end)
+
+                        -- 2. MÓDSZER: Ha a prompt nyomvatartást igényel
+                        if prompt.HoldDuration and prompt.HoldDuration > 0 then
+                            pcall(function()
+                                prompt:InputHoldBegin()
+                                task.wait(prompt.HoldDuration + 0.05)
+                                prompt:InputHoldEnd()
+                            end)
+                        end
+                    end
+
+                    -- 3. MÓDSZER: E gomb szimulálása (ez a legmegbízhatóbb)
+                    pcall(function()
+                        keypress(0x45) -- 0x45 = E gomb
+                        task.wait(0.1)
+                        keyrelease(0x45)
+                    end)
+                end
+            end
         end
     end
 end)
 
 -- ============================================================
---  AUTOMATIKUS FRISSÍTÉS (ha új tojás spawnol / eltűnik)
+--  AUTOMATIKUS FRISSÍTÉS
 -- ============================================================
 task.spawn(function()
     local folder = findSpawnedEggs()
@@ -275,6 +292,6 @@ end)
 
 Rayfield:Notify({
     Title = "Betöltve!",
-    Content = "SpawnedEggs script aktív. A lista automatikusan frissül!",
+    Content = "Auto Steal javított verzió aktív. Állítsd be a távolságot!",
     Duration = 5
 })
