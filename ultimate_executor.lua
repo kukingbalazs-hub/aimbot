@@ -1,5 +1,5 @@
 -- ============================================================
---  KUKING HUB - Steal A Fish Egg (v5 - Semi-Auto + Auto)
+--  KUKING HUB - Steal A Fish Egg (v6 - Teleport Only)
 --  Rayfield GUI - Delta Executor compatible
 -- ============================================================
 
@@ -7,7 +7,6 @@ local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
-local UserInputService = game:GetService("UserInputService")
 local LocalPlayer = Players.LocalPlayer
 
 local Window = Rayfield:CreateWindow({
@@ -230,26 +229,16 @@ EggsTab:CreateButton({
     end
 })
 
-local holdTime = 0.5
+-- Time you have to press E at the egg
+local waitAtEgg = 2.5
 EggsTab:CreateSlider({
-    Name = "Arrival Wait (sec)",
-    Range = {0.1, 3},
-    Increment = 0.1,
+    Name = "Time to Press E (sec)",
+    Range = {0.5, 10},
+    Increment = 0.5,
     Suffix = "s",
-    CurrentValue = 0.5,
-    Flag = "HoldTimeSlider",
-    Callback = function(value) holdTime = value end,
-})
-
-local returnDelay = 1.0
-EggsTab:CreateSlider({
-    Name = "Return to Plot Delay (sec)",
-    Range = {0.1, 5},
-    Increment = 0.1,
-    Suffix = "s",
-    CurrentValue = 1.0,
-    Flag = "ReturnDelaySlider",
-    Callback = function(value) returnDelay = value end,
+    CurrentValue = 2.5,
+    Flag = "WaitAtEggSlider",
+    Callback = function(value) waitAtEgg = value end,
 })
 
 local sideOffset = 4
@@ -264,90 +253,30 @@ EggsTab:CreateSlider({
 })
 
 -- ============================================================
---  STEAL MODE SELECTION
--- ============================================================
-local semiAutoMode = true -- Default: semi-auto (manual E press)
-
-EggsTab:CreateSection("Steal Mode")
-
-EggsTab:CreateToggle({
-    Name = "Semi-Auto Mode (you press E)",
-    CurrentValue = true,
-    Flag = "SemiAutoToggle",
-    Callback = function(value)
-        semiAutoMode = value
-        if value then
-            Rayfield:Notify({Title="Mode", Content="SEMI-AUTO: You press E manually.", Duration=3})
-        else
-            Rayfield:Notify({Title="Mode", Content="AUTO: Script tries to press E.", Duration=3})
-        end
-    end
-})
-
--- ============================================================
---  AUTO STEAL LOOP
+--  AUTO STEAL (TELEPORT ONLY - NO E PRESS)
 -- ============================================================
 local autoStealEnabled = false
 local stealing = false
 
+EggsTab:CreateSection("Auto Steal")
+
 EggsTab:CreateToggle({
-    Name = "Auto Steal ON/OFF",
+    Name = "Auto Steal ON/OFF (Teleport Only)",
     CurrentValue = false,
     Flag = "AutoStealToggle",
     Callback = function(value)
         autoStealEnabled = value
-        Rayfield:Notify({Title="Auto Steal", Content=value and "ENABLED" or "DISABLED", Duration=2})
-    end
-})
-
--- ============================================================
---  TRY PICKUP (all methods)
--- ============================================================
-local function tryPickup(eggInstance)
-    local prompts = {}
-    for _, d in ipairs(eggInstance:GetDescendants()) do
-        if d:IsA("ProximityPrompt") then
-            table.insert(prompts, d)
+        if value then
+            Rayfield:Notify({
+                Title = "Auto Steal",
+                Content = "Teleport mode - you press E manually!",
+                Duration = 3
+            })
+        else
+            Rayfield:Notify({Title="Auto Steal", Content="DISABLED", Duration=2})
         end
     end
-
-    for _, prompt in ipairs(prompts) do
-        pcall(function()
-            prompt.MaxActivationDistance = 100
-            prompt.RequiresLineOfSight = false
-            prompt.HoldDuration = 0
-            prompt.Enabled = true
-        end)
-        task.wait(0.05)
-
-        pcall(function() fireproximityprompt(prompt) end)
-        task.wait(0.05)
-
-        pcall(function()
-            prompt:InputHoldBegin()
-            task.wait(0.15)
-            prompt:InputHoldEnd()
-        end)
-        pcall(function()
-            prompt:InputPressed()
-            task.wait(0.1)
-            prompt:InputReleased()
-        end)
-    end
-
-    -- VirtualInputManager E key
-    pcall(function()
-        local VIM = game:GetService("VirtualInputManager")
-        VIM:SendKeyEvent(true, Enum.KeyCode.E, false, game)
-        task.wait(0.1)
-        VIM:SendKeyEvent(false, Enum.KeyCode.E, false, game)
-    end)
-
-    -- keypress/keyrelease (executor)
-    pcall(function() keypress(0x45) end)
-    task.wait(0.1)
-    pcall(function() keyrelease(0x45) end)
-end
+})
 
 -- ============================================================
 --  TELEPORT + LOOK AT TARGET
@@ -372,7 +301,7 @@ local function tpAndLookAt(targetPos)
 end
 
 -- ============================================================
---  STEAL FLOW
+--  STEAL FLOW (ONLY TELEPORT, NO E PRESS)
 -- ============================================================
 local function stealRarity(rarity)
     if stealing then return end
@@ -411,25 +340,18 @@ local function stealRarity(rarity)
         return
     end
 
-    -- Teleport + rotate camera
+    -- Teleport to the egg
     tpAndLookAt(targetPos)
-    task.wait(holdTime)
 
-    if semiAutoMode then
-        -- SEMI-AUTO: tell user to press E
-        Rayfield:Notify({
-            Title = "🎯 Press E NOW!",
-            Content = target.Name .. " - Press E to steal!",
-            Duration = returnDelay + 1
-        })
-        task.wait(returnDelay)
-    else
-        -- AUTO: try all methods
-        tryPickup(target)
-        task.wait(0.2)
-        tryPickup(target)
-        task.wait(returnDelay - 0.2)
-    end
+    -- Notify the user to press E
+    Rayfield:Notify({
+        Title = "🎯 Press E!",
+        Content = target.Name,
+        Duration = waitAtEgg
+    })
+
+    -- Wait for user to press E
+    task.wait(waitAtEgg)
 
     -- Return to plot
     local plotPos = getPlotPosition()
@@ -438,9 +360,13 @@ local function stealRarity(rarity)
         if hrp2 then hrp2.CFrame = CFrame.new(plotPos) end
     end
 
+    -- Short cooldown before next egg
+    task.wait(0.4)
+
     stealing = false
 end
 
+-- Main loop
 task.spawn(function()
     while task.wait(0.3) do
         if autoStealEnabled and selectedRarity and not stealing then
@@ -469,6 +395,6 @@ end)
 
 Rayfield:Notify({
     Title = "Kuking Hub",
-    Content = "Loaded! SEMI-AUTO mode default - you press E.",
+    Content = "Loaded! Teleport-only mode. You press E at each egg.",
     Duration = 5
 })
