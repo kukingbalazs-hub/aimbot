@@ -271,6 +271,17 @@ EggsTab:CreateSlider({
     Callback = function(value) returnDelay = value end,
 })
 
+local sideOffset = 5
+EggsTab:CreateSlider({
+    Name = "Side Offset (studs)",
+    Range = {2, 15},
+    Increment = 1,
+    Suffix = "studs",
+    CurrentValue = 5,
+    Flag = "SideOffsetSlider",
+    Callback = function(value) sideOffset = value end,
+})
+
 -- ============================================================
 --  AUTO STEAL LOOP
 -- ============================================================
@@ -293,34 +304,29 @@ local function tpTo(pos)
 end
 
 -- ============================================================
---  TRY PICKUP (6 METHODS - IMPROVED)
+--  TRY PICKUP (6 METHODS)
 -- ============================================================
 local function tryPickup(eggInstance)
     local prompt = eggInstance:FindFirstChildWhichIsA("ProximityPrompt", true)
 
     if prompt then
-        -- 1. fireproximityprompt
         pcall(function() fireproximityprompt(prompt) end)
 
-        -- 2. InputHold Begin/End
         pcall(function()
             prompt:InputHoldBegin()
             task.wait(prompt.HoldDuration > 0 and prompt.HoldDuration + 0.1 or 0.3)
             prompt:InputHoldEnd()
         end)
 
-        -- 3. InputPressed / InputReleased
         pcall(function()
             prompt:InputPressed()
             task.wait(0.15)
             prompt:InputReleased()
         end)
 
-        -- 4. fireproximityprompt second time
         pcall(function() fireproximityprompt(prompt) end)
     end
 
-    -- 5. VirtualInputManager - real E key simulation
     pcall(function()
         local VIM = game:GetService("VirtualInputManager")
         VIM:SendKeyEvent(true, Enum.KeyCode.E, false, game)
@@ -328,7 +334,6 @@ local function tryPickup(eggInstance)
         VIM:SendKeyEvent(false, Enum.KeyCode.E, false, game)
     end)
 
-    -- 6. VirtualUser fallback
     pcall(function()
         local VU = game:GetService("VirtualUser")
         VU:Button1Down(Vector2.new(0, 0))
@@ -338,7 +343,7 @@ local function tryPickup(eggInstance)
 end
 
 -- ============================================================
---  STEAL RARITY FLOW
+--  STEAL RARITY FLOW (line-of-sight fix)
 -- ============================================================
 local function stealRarity(rarity)
     if stealing then return end
@@ -367,16 +372,38 @@ local function stealRarity(rarity)
         return
     end
 
-    -- Teleport to egg
-    tpTo(targetPos + Vector3.new(0, 2, 0))
+    -- DIAGNOSTIC
+    local prompt = target:FindFirstChildWhichIsA("ProximityPrompt", true)
+    if prompt then
+        print("=== PROMPT DEBUG ===")
+        print("Name:", prompt.Name)
+        print("HoldDuration:", prompt.HoldDuration)
+        print("MaxActivationDistance:", prompt.MaxActivationDistance)
+        print("RequiresLineOfSight:", prompt.RequiresLineOfSight)
+        print("Enabled:", prompt.Enabled)
+        print("ActionText:", prompt.ActionText)
+        print("ObjectText:", prompt.ObjectText)
+        print("====================")
+    else
+        print("[Auto Steal] No ProximityPrompt found on target: "..target.Name)
+    end
 
-    -- Wait for prompt to appear
+    -- Teleport BESIDE the egg (not on top of it) so line-of-sight works
+    local offset = Vector3.new(sideOffset, 0, 0)
+    local sidePos = targetPos + offset
+
+    tpTo(sidePos)
+    task.wait(0.15)
+
+    -- Look at the egg
+    if hrp then
+        hrp.CFrame = CFrame.new(sidePos, targetPos)
+    end
+
     task.wait(holdTime)
 
-    -- Try to pick up (6 methods)
     tryPickup(target)
 
-    -- Wait for server to process
     task.wait(returnDelay)
 
     -- Return to plot
