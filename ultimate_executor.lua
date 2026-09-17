@@ -1,229 +1,274 @@
 --[[
-    UTOPIA v11 — Rayfield nélkül
-    Saját egyszerű UI
+    ═══════════════════════════════════════════════════════
+              UTOPIA SCRIPT v4.1
+           Job System Auto-Complete
+           Delay: 0.70s | Távolról működik
+    ═══════════════════════════════════════════════════════
 --]]
 
+local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+
 local RS = game:GetService("ReplicatedStorage")
-local Players = game:GetService("Players")
-local LocalPlayer = Players.LocalPlayer
 local JobAction = RS:WaitForChild("JobSystem"):WaitForChild("JobAction")
 
+-- ═══════════════════════════════════════════
+-- ÁLLAPOT
+-- ═══════════════════════════════════════════
+
 local State = {
-    Enabled = false,
-    Action = "Smelt",
-    Range = 20,
-    TriggerHold = 0.15,
-    AfterTrigger = 0.3,
-    Delay = 2,
+    AutoComplete = false,
+    CompleteDelay = 0.7,        -- alap: 0.70 másodperc
+    Randomize = true,           -- 0.65 - 0.75 között random
+    RandomSpread = 0.05,        -- +- 0.05
+
+    Actions = {
+        Quench = false,
+        Trace = false,
+        Hammer = false,
+        Smelt = false,
+        Craft = false,
+        JobTerminal = false,
+    },
     Count = 0,
+    LastAction = 0,
 }
 
 -- ═══════════════════════════════════════════
--- PROMPT KERESÉS
+-- JOBSYSTEM FIGYELŐ
 -- ═══════════════════════════════════════════
 
-local function getPromptPosition(prompt)
-    local parent = prompt.Parent
-    if not parent then return nil end
-    if parent:IsA("BasePart") then return parent.Position end
-    if parent:IsA("Model") then
-        if parent.PrimaryPart then return parent.PrimaryPart.Position end
-        local part = parent:FindFirstChildWhichIsA("BasePart")
-        if part then return part.Position end
+local mtHook
+mtHook = hookmetamethod(game, "__namecall", function(...)
+    if rawequal((...), JobAction) and getnamecallmethod() == "FireServer" then
+        print("[JobAction] FireServer:", ...)
     end
-    return nil
-end
-
-local function getNearestPrompt()
-    local char = LocalPlayer.Character
-    if not char or not char:FindFirstChild("HumanoidRootPart") then return nil end
-    local rootPos = char.HumanoidRootPart.Position
-    local nearest, nearestDist = nil, State.Range
-
-    for _, d in ipairs(workspace:GetDescendants()) do
-        if d:IsA("ProximityPrompt") then
-            local pos = getPromptPosition(d)
-            if pos then
-                local dist = (pos - rootPos).Magnitude
-                if dist < nearestDist then
-                    nearest = d
-                    nearestDist = dist
-                end
-            end
-        end
-    end
-    return nearest, nearestDist
-end
+    return mtHook(...)
+end)
 
 -- ═══════════════════════════════════════════
--- EGY LÉPÉS
+-- AUTO-COMPLETE LOGIKA
 -- ═══════════════════════════════════════════
 
-local function doStep()
-    local prompt, dist = getNearestPrompt()
-    if not prompt then
-        warn("[Utopia] Nincs prompt a hatótávon belül!")
-        return false
-    end
-
-    print(`[Utopia] Prompt: "{prompt.Name}" ({dist:.1f} studs) — ActionText: "{prompt.ActionText}"`)
-
-    pcall(function() prompt:InputHoldBegin() end)
-    task.wait(State.TriggerHold)
-    pcall(function() prompt:InputHoldEnd() end)
-    task.wait(State.AfterTrigger)
-
+local function fireAction(actionName)
     pcall(function()
-        JobAction:FireServer(State.Action)
+        JobAction:FireServer(actionName)
         State.Count = State.Count + 1
-        print(`[Utopia] JobAction: {State.Action} (#{State.Count})`)
+        State.LastAction = tick()
+        print(`[Utopia] {actionName} (#{State.Count})`)
     end)
-    return true
+end
+
+-- Kiszámolja a következő delay-t (randommal vagy fixen)
+local function getNextDelay()
+    if State.Randomize then
+        local spread = State.RandomSpread
+        return State.CompleteDelay + (math.random() * spread * 2 - spread)
+    end
+    return State.CompleteDelay
 end
 
 task.spawn(function()
-    while task.wait(State.Delay) do
-        if State.Enabled then
-            doStep()
-        end
-    end
-end)
-
--- ═══════════════════════════════════════════
--- SAJÁT UI (Rayfield nélkül)
--- ═══════════════════════════════════════════
-
-local gui = Instance.new("ScreenGui")
-gui.Name = "UtopiaGUI"
-gui.ResetOnSpawn = false
-gui.Parent = LocalPlayer:WaitForChild("PlayerGui")
-
--- Fő frame
-local main = Instance.new("Frame")
-main.Size = UDim2.new(0, 260, 0, 300)
-main.Position = UDim2.new(0, 20, 0, 100)
-main.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
-main.BorderSizePixel = 0
-main.Active = true
-main.Draggable = true
-main.Parent = gui
-
-local corner = Instance.new("UICorner")
-corner.CornerRadius = UDim.new(0, 8)
-corner.Parent = main
-
--- Cím
-local title = Instance.new("TextLabel")
-title.Size = UDim2.new(1, 0, 0, 35)
-title.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
-title.BorderSizePixel = 0
-title.Text = "Utopia v11"
-title.TextColor3 = Color3.fromRGB(255, 255, 255)
-title.Font = Enum.Font.GothamBold
-title.TextSize = 16
-title.Parent = main
-
-local titleCorner = Instance.new("UICorner")
-titleCorner.CornerRadius = UDim.new(0, 8)
-titleCorner.Parent = title
-
--- Action dropdown (egyszerű gombok)
-local actions = {"Quench", "Trace", "Hammer", "Smelt", "Craft", "JobTerminal"}
-local yPos = 45
-
-for _, action in ipairs(actions) do
-    local btn = Instance.new("TextButton")
-    btn.Size = UDim2.new(1, -20, 0, 28)
-    btn.Position = UDim2.new(0, 10, 0, yPos)
-    btn.BackgroundColor3 = (action == State.Action) and Color3.fromRGB(0, 120, 215) or Color3.fromRGB(50, 50, 60)
-    btn.Text = action
-    btn.TextColor3 = Color3.fromRGB(255, 255, 255)
-    btn.Font = Enum.Font.Gotham
-    btn.TextSize = 13
-    btn.Parent = main
-
-    local bc = Instance.new("UICorner")
-    bc.CornerRadius = UDim.new(0, 5)
-    bc.Parent = btn
-
-    btn.MouseButton1Click:Connect(function()
-        State.Action = action
-        -- Frissítés
-        for _, child in ipairs(main:GetChildren()) do
-            if child:IsA("TextButton") and child ~= btn then
-                if child.Name == "ActionBtn" then
-                    child.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
+    while task.wait(getNextDelay()) do
+        if State.AutoComplete then
+            for action, enabled in pairs(State.Actions) do
+                if enabled then
+                    fireAction(action)
                 end
             end
         end
-        btn.BackgroundColor3 = Color3.fromRGB(0, 120, 215)
-        print(`[Utopia] Action: {action}`)
-    end)
-    btn.Name = "ActionBtn"
-
-    yPos = yPos + 32
-end
-
--- BE/KI gomb
-local toggleBtn = Instance.new("TextButton")
-toggleBtn.Size = UDim2.new(1, -20, 0, 35)
-toggleBtn.Position = UDim2.new(0, 10, 0, yPos + 5)
-toggleBtn.BackgroundColor3 = Color3.fromRGB(180, 50, 50)
-toggleBtn.Text = "BE (kikapcsolva)"
-toggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-toggleBtn.Font = Enum.Font.GothamBold
-toggleBtn.TextSize = 14
-toggleBtn.Parent = main
-
-local tbc = Instance.new("UICorner")
-tbc.CornerRadius = UDim.new(0, 5)
-tbc.Parent = toggleBtn
-
-toggleBtn.MouseButton1Click:Connect(function()
-    State.Enabled = not State.Enabled
-    if State.Enabled then
-        toggleBtn.Text = "BE (bekapcsolva)"
-        toggleBtn.BackgroundColor3 = Color3.fromRGB(50, 180, 50)
-    else
-        toggleBtn.Text = "BE (kikapcsolva)"
-        toggleBtn.BackgroundColor3 = Color3.fromRGB(180, 50, 50)
     end
 end)
 
--- Egyszeri gomb
-local stepBtn = Instance.new("TextButton")
-stepBtn.Size = UDim2.new(1, -20, 0, 30)
-stepBtn.Position = UDim2.new(0, 10, 0, yPos + 45)
-stepBtn.BackgroundColor3 = Color3.fromRGB(80, 80, 100)
-stepBtn.Text = "Egyszeri lépés (most)"
-stepBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-stepBtn.Font = Enum.Font.Gotham
-stepBtn.TextSize = 13
-stepBtn.Parent = main
+-- ═══════════════════════════════════════════
+-- RAYFIELD UI
+-- ═══════════════════════════════════════════
 
-local sbc = Instance.new("UICorner")
-sbc.CornerRadius = UDim.new(0, 5)
-sbc.Parent = stepBtn
+local Window = Rayfield:CreateWindow({
+    Name = "Utopia Script v4.1",
+    LoadingTitle = "Utopia Script",
+    LoadingSubtitle = "Job Auto-Complete 0.7s",
+    ConfigurationSaving = {
+        Enabled = true,
+        FolderName = "UtopiaScript",
+        FileName = "jobsystem_v41"
+    },
+    KeySystem = false,
+})
 
-stepBtn.MouseButton1Click:Connect(function()
-    doStep()
-end)
+-- ─── TAB 1: AUTO-COMPLETE ───
 
--- Státusz
-local statusLabel = Instance.new("TextLabel")
-statusLabel.Size = UDim2.new(1, -20, 0, 20)
-statusLabel.Position = UDim2.new(0, 10, 1, -25)
-statusLabel.BackgroundTransparency = 1
-statusLabel.Text = "Hívások: 0"
-statusLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
-statusLabel.Font = Enum.Font.Gotham
-statusLabel.TextSize = 12
-statusLabel.Parent = main
+local Tab1 = Window:CreateTab("Auto-Complete", 4483362458)
+
+Tab1:CreateSection("Fő kapcsoló")
+
+Tab1:CreateToggle({
+    Name = "Auto-Complete BE",
+    CurrentValue = false,
+    Flag = "AutoComplete",
+    Callback = function(value)
+        State.AutoComplete = value
+        Rayfield:Notify({
+            Title = "Utopia",
+            Content = value and "BE — távolról működik!" or "KI",
+            Duration = 3,
+        })
+    end,
+})
+
+Tab1:CreateSlider({
+    Name = "Delay (másodperc)",
+    Range = {0.3, 3},
+    Increment = 0.05,
+    Suffix = "s",
+    CurrentValue = 0.7,
+    Flag = "CompleteDelay",
+    Callback = function(value)
+        State.CompleteDelay = value
+    end,
+})
+
+Tab1:CreateToggle({
+    Name = "Randomizálás (0.65 - 0.75)",
+    CurrentValue = true,
+    Flag = "Randomize",
+    Callback = function(value)
+        State.Randomize = value
+    end,
+})
+
+Tab1:CreateSlider({
+    Name = "Random szórás (±)",
+    Range = {0, 0.2},
+    Increment = 0.01,
+    Suffix = "s",
+    CurrentValue = 0.05,
+    Flag = "RandomSpread",
+    Callback = function(value)
+        State.RandomSpread = value
+    end,
+})
+
+Tab1:CreateSection("Melyik minigame-eket?")
+
+Tab1:CreateToggle({
+    Name = "Quench",
+    CurrentValue = false,
+    Flag = "ActQuench",
+    Callback = function(value)
+        State.Actions.Quench = value
+    end,
+})
+
+Tab1:CreateToggle({
+    Name = "Trace",
+    CurrentValue = false,
+    Flag = "ActTrace",
+    Callback = function(value)
+        State.Actions.Trace = value
+    end,
+})
+
+Tab1:CreateToggle({
+    Name = "Hammer",
+    CurrentValue = false,
+    Flag = "ActHammer",
+    Callback = function(value)
+        State.Actions.Hammer = value
+    end,
+})
+
+Tab1:CreateToggle({
+    Name = "Smelt",
+    CurrentValue = false,
+    Flag = "ActSmelt",
+    Callback = function(value)
+        State.Actions.Smelt = value
+    end,
+})
+
+Tab1:CreateToggle({
+    Name = "Craft",
+    CurrentValue = false,
+    Flag = "ActCraft",
+    Callback = function(value)
+        State.Actions.Craft = value
+    end,
+})
+
+-- ─── TAB 2: MANUÁLIS ───
+
+local Tab2 = Window:CreateTab("Manuális", 4483362458)
+
+Tab2:CreateSection("Egyedi hívás")
+
+local inputAction = "Quench"
+
+Tab2:CreateInput({
+    Name = "Action név",
+    CurrentValue = "Quench",
+    PlaceholderText = "pl. Quench, Trace, Hammer",
+    Flag = "InputAction",
+    Callback = function(value)
+        inputAction = value
+    end,
+})
+
+Tab2:CreateButton({
+    Name = "Küldés",
+    Callback = function()
+        fireAction(inputAction)
+        Rayfield:Notify({
+            Title = "Utopia",
+            Content = `Elküldve: "{inputAction}"`,
+            Duration = 3,
+        })
+    end,
+})
+
+Tab2:CreateSection("Gyors gombok")
+
+for _, action in ipairs({"Quench", "Trace", "Hammer", "Smelt", "Craft", "JobTerminal"}) do
+    Tab2:CreateButton({
+        Name = action,
+        Callback = function()
+            fireAction(action)
+            Rayfield:Notify({
+                Title = "Utopia",
+                Content = `Elküldve: "{action}"`,
+                Duration = 2,
+            })
+        end,
+    })
+end
+
+-- ─── TAB 3: INFO ───
+
+local Tab3 = Window:CreateTab("Info", 4483362458)
+
+Tab3:CreateSection("Státusz")
+
+local statusLabel = Tab3:CreateLabel("Hívások: 0")
 
 task.spawn(function()
     while task.wait(1) do
-        statusLabel.Text = `Hívások: {State.Count}`
+        pcall(function()
+            local since = State.LastAction > 0 and string.format("%.1f", tick() - State.LastAction) or "-"
+            statusLabel:Set(`Hívások: {State.Count} | Utolsó: {since}s`)
+        end)
     end
 end)
 
-print("[Utopia v11] Betöltve! Bal felső sarokban a UI.")
+Tab3:CreateSection("Használat")
+
+Tab3:CreateLabel("1. Auto-Complete BE")
+Tab3:CreateLabel("2. Action(ök) be")
+Tab3:CreateLabel("3. NEM kell odamenni!")
+Tab3:CreateLabel("4. Nézd a konzolt (F9)")
+
+Rayfield:Notify({
+    Title = "Utopia Script v4.1",
+    Content = "Betöltve! 0.70s delay, távolról működik.",
+    Duration = 5,
+})
+
+print("[Utopia v4.1] Betöltve. Delay: 0.7s. Távolról működik.")
