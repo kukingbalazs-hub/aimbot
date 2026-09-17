@@ -1,400 +1,308 @@
--- ============================================================
---  KUKING HUB - Steal A Fish Egg (v6 - Teleport Only)
---  Rayfield GUI - Delta Executor compatible
--- ============================================================
+--[[
+    ═══════════════════════════════════════════════════════
+                    UTOPIA SCRIPT
+              Jump for Brainrots / Animals
+              Rayfield UI Edition
+    ═══════════════════════════════════════════════════════
+--]]
+
+-- ═══════════════════════════════════════════
+-- RAYFIELD BETÖLTÉSE
+-- ═══════════════════════════════════════════
 
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
+-- ═══════════════════════════════════════════
+-- SZOLGÁLTATÁSOK
+-- ═══════════════════════════════════════════
+
+local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
+
 local LocalPlayer = Players.LocalPlayer
 
+-- ═══════════════════════════════════════════
+-- ÁLLAPOT
+-- ═══════════════════════════════════════════
+
+local State = {
+    -- ProximityPrompt
+    PromptEnabled = false,
+    HoldDuration = 0.5,
+
+    -- Auto Collect
+    AutoCollectEnabled = false,
+    CollectRange = 50,
+
+    -- ESP
+    ESPEnabled = false,
+
+    -- Stats
+    PromptCount = 0,
+}
+
+-- ═══════════════════════════════════════════
+-- PROXIMITY PROMPT KEZELŐ
+-- ═══════════════════════════════════════════
+
+local function applyPrompt(prompt)
+    if not prompt or not prompt:IsA("ProximityPrompt") then return end
+    if prompt.HoldDuration ~= State.HoldDuration then
+        prompt.HoldDuration = State.HoldDuration
+        State.PromptCount = State.PromptCount + 1
+    end
+end
+
+local function applyAllPrompts(root)
+    if not root then return end
+    for _, d in ipairs(root:GetDescendants()) do
+        if d:IsA("ProximityPrompt") then
+            applyPrompt(d)
+        end
+    end
+end
+
+-- Új promptok figyelése
+workspace.DescendantAdded:Connect(function(d)
+    if not State.PromptEnabled then return end
+    if d:IsA("ProximityPrompt") then
+        task.wait(0.1)
+        applyPrompt(d)
+    end
+end)
+
+-- Folyamatos frissítés
+task.spawn(function()
+    while task.wait(0.5) do
+        if State.PromptEnabled then
+            applyAllPrompts(workspace)
+        end
+    end
+end)
+
+-- ═══════════════════════════════════════════
+-- AUTO COLLECT
+-- ═══════════════════════════════════════════
+
+local function getNearbyPrompts(range)
+    local found = {}
+    local char = LocalPlayer.Character
+    if not char or not char:FindFirstChild("HumanoidRootPart") then return found end
+
+    local rootPos = char.HumanoidRootPart.Position
+
+    for _, d in ipairs(workspace:GetDescendants()) do
+        if d:IsA("ProximityPrompt") then
+            local parent = d.Parent
+            if parent and parent:IsA("BasePart") then
+                local dist = (parent.Position - rootPos).Magnitude
+                if dist <= range then
+                    table.insert(found, {prompt = d, dist = dist, part = parent})
+                end
+            end
+        end
+    end
+    return found
+end
+
+task.spawn(function()
+    while task.wait(0.2) do
+        if State.AutoCollectEnabled then
+            local nearby = getNearbyPrompts(State.CollectRange)
+            for _, info in ipairs(nearby) do
+                pcall(function()
+                    info.prompt:InputHoldBegin()
+                    task.wait(0.05)
+                    info.prompt:InputHoldEnd()
+                end)
+            end
+        end
+    end
+end)
+
+-- ═══════════════════════════════════════════
+-- ESP
+-- ═══════════════════════════════════════════
+
+local espObjects = {}
+
+local function createESP(part, color)
+    if not part or not part:IsA("BasePart") then return end
+    if espObjects[part] then return end
+
+    local box = Instance.new("BoxHandleAdornment")
+    box.Size = part.Size
+    box.Adornee = part
+    box.AlwaysOnTop = true
+    box.ZIndex = 5
+    box.Transparency = 0.5
+    box.Color3 = color or Color3.fromRGB(0, 255, 100)
+    box.Parent = part
+
+    espObjects[part] = box
+end
+
+local function clearESP()
+    for part, box in pairs(espObjects) do
+        if box and box.Parent then
+            box:Destroy()
+        end
+    end
+    espObjects = {}
+end
+
+task.spawn(function()
+    while task.wait(0.5) do
+        if State.ESPEnabled then
+            for _, d in ipairs(workspace:GetDescendants()) do
+                if d:IsA("ProximityPrompt") and d.Parent and d.Parent:IsA("BasePart") then
+                    createESP(d.Parent, Color3.fromRGB(0, 255, 100))
+                end
+            end
+        end
+    end
+end)
+
+-- ═══════════════════════════════════════════
+-- RAYFIELD UI
+-- ═══════════════════════════════════════════
+
 local Window = Rayfield:CreateWindow({
-    Name = "Kuking Hub",
-    LoadingTitle = "Loading...",
-    LoadingSubtitle = "by Kuking",
-    ConfigurationSaving = { Enabled = false }
+    Name = "Utopia Script",
+    LoadingTitle = "Utopia Script",
+    LoadingSubtitle = "Jump for Brainrots",
+    ConfigurationSaving = {
+        Enabled = true,
+        FolderName = "UtopiaScript",
+        FileName = "config"
+    },
+    Discord = {
+        Enabled = false,
+    },
+    KeySystem = false,
 })
 
-local MainTab = Window:CreateTab("Main", 4483362458)
-local EggsTab = Window:CreateTab("Auto Steal", 4483362458)
+-- ─── TAB 1: INTERAKCIÓK ───
 
--- ============================================================
---  HELPERS
--- ============================================================
-local function getHRP()
-    local char = LocalPlayer.Character
-    if char then return char:FindFirstChild("HumanoidRootPart") end
-    return nil
-end
+local Tab1 = Window:CreateTab("Interakciók", 4483362458)
 
-local function getPositionFromInstance(inst)
-    if inst:IsA("BasePart") then return inst.Position end
-    if inst:IsA("Model") then
-        local primary = inst.PrimaryPart or inst:FindFirstChildWhichIsA("BasePart")
-        if primary then return primary.Position end
-    end
-    local part = inst:FindFirstChildWhichIsA("BasePart", true)
-    if part then return part.Position end
-    return nil
-end
+Tab1:CreateSection("ProximityPrompt")
 
-local function getEggRarity(egg)
-    local attr = egg:GetAttribute("Rarity")
-    if attr then return tostring(attr) end
-    local rarityVal = egg:FindFirstChild("Rarity") or egg:FindFirstChild("RarityValue")
-    if rarityVal then
-        if rarityVal:IsA("StringValue") then return rarityVal.Value end
-        if rarityVal:IsA("ObjectValue") and rarityVal.Value then return rarityVal.Value.Name end
-    end
-    local name = egg.Name
-    local knownRarities = {"Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythic", "Secret", "Godly", "Divine"}
-    for _, r in ipairs(knownRarities) do
-        if name:lower():find(r:lower(), 1, true) then return r end
-    end
-    return "Unknown"
-end
-
--- ============================================================
---  PLOT FINDER
--- ============================================================
-local function getPlotPosition()
-    local directNames = {"Plot", "MyPlot", "Base", "House", "Home", "PlotArea", "PlayerPlot"}
-    for _, name in ipairs(directNames) do
-        local obj = game.Workspace:FindFirstChild(name)
-        if obj then
-            local part = obj:IsA("BasePart") and obj or obj:FindFirstChildWhichIsA("BasePart", true)
-            if part then return part.Position + Vector3.new(0, 5, 0) end
-        end
-    end
-    local pname = LocalPlayer.Name
-    local named = game.Workspace:FindFirstChild(pname .. "Plot")
-        or game.Workspace:FindFirstChild(pname .. "'s Plot")
-        or game.Workspace:FindFirstChild(pname .. "Base")
-    if named then
-        local part = named:IsA("BasePart") and named or named:FindFirstChildWhichIsA("BasePart", true)
-        if part then return part.Position + Vector3.new(0, 5, 0) end
-    end
-    for _, obj in ipairs(game.Workspace:GetDescendants()) do
-        local n = obj.Name:lower()
-        if n:find("plot") or n:find("base") then
-            local owner = obj:FindFirstChild("Owner") or obj:FindFirstChild("Player") or obj:FindFirstChild("OwnerName")
-            local isMine = false
-            if owner then
-                if owner:IsA("ObjectValue") and owner.Value == LocalPlayer then isMine = true
-                elseif owner:IsA("StringValue") and owner.Value == LocalPlayer.Name then isMine = true end
-            end
-            if obj.Name:find(LocalPlayer.Name, 1, true) then isMine = true end
-            if isMine then
-                local part = obj:IsA("BasePart") and obj or obj:FindFirstChildWhichIsA("BasePart", true)
-                if part then return part.Position + Vector3.new(0, 5, 0) end
-            end
-        end
-    end
-    local spawn = game.Workspace:FindFirstChild("SpawnLocation")
-    if spawn and spawn:IsA("BasePart") then
-        return spawn.Position + Vector3.new(0, 5, 0)
-    end
-    return nil
-end
-
--- ============================================================
---  SPEED
--- ============================================================
-local currentSpeed = 16
-local originalSpeed = 16
-
-MainTab:CreateSlider({
-    Name = "WalkSpeed",
-    Range = {16, 500},
-    Increment = 1,
-    Suffix = "studs",
-    CurrentValue = 16,
-    Flag = "SpeedSlider",
+Tab1:CreateToggle({
+    Name = "Prompt módosítás",
+    CurrentValue = false,
+    Flag = "PromptEnabled",
     Callback = function(value)
-        currentSpeed = value
-        local char = LocalPlayer.Character
-        if char then
-            local hum = char:FindFirstChildOfClass("Humanoid")
-            if hum then hum.WalkSpeed = value end
+        State.PromptEnabled = value
+        if value then
+            applyAllPrompts(workspace)
         end
     end,
 })
 
-MainTab:CreateButton({
-    Name = "▶ Apply Speed Now",
-    Callback = function()
-        local char = LocalPlayer.Character
-        if char then
-            local hum = char:FindFirstChildOfClass("Humanoid")
-            if hum then hum.WalkSpeed = currentSpeed end
-        end
-    end
-})
-
-MainTab:CreateButton({
-    Name = "🔄 Reset Speed (16)",
-    Callback = function()
-        currentSpeed = originalSpeed
-        local char = LocalPlayer.Character
-        if char then
-            local hum = char:FindFirstChildOfClass("Humanoid")
-            if hum then hum.WalkSpeed = originalSpeed end
-        end
-    end
-})
-
-LocalPlayer.CharacterAdded:Connect(function(char)
-    task.wait(1)
-    local hum = char:FindFirstChildOfClass("Humanoid")
-    if hum then hum.WalkSpeed = currentSpeed end
-end)
-
--- ============================================================
---  EGG COLLECTION
--- ============================================================
-local eggList = {}
-
-local function findSpawnedEggs()
-    local folder = game.Workspace:FindFirstChild("SpawnedEggs")
-    if folder then return folder end
-    for _, obj in ipairs(game.Workspace:GetDescendants()) do
-        if obj.Name == "SpawnedEggs" then return obj end
-    end
-    return nil
-end
-
-local function collectEggs()
-    local eggs = {}
-    local folder = findSpawnedEggs()
-    if folder then
-        for _, child in ipairs(folder:GetChildren()) do
-            if child:IsA("Model") or child:IsA("BasePart") then
-                table.insert(eggs, {
-                    instance = child,
-                    name = child.Name,
-                    rarity = getEggRarity(child),
-                    position = getPositionFromInstance(child)
-                })
-            end
-        end
-    end
-    return eggs
-end
-
--- ============================================================
---  RARITY DROPDOWN
--- ============================================================
-local selectedRarity = nil
-local rarityDropdown
-
-local function getAvailableRarities()
-    eggList = collectEggs()
-    local rarities = {}
-    local seen = {}
-    for _, e in ipairs(eggList) do
-        if not seen[e.rarity] then
-            seen[e.rarity] = true
-            table.insert(rarities, e.rarity)
-        end
-    end
-    table.sort(rarities)
-    if #rarities == 0 then rarities = { "(No eggs found)" } end
-    return rarities
-end
-
-EggsTab:CreateSection("Steal Settings")
-
-rarityDropdown = EggsTab:CreateDropdown({
-    Name = "Select Rarity to Steal",
-    Options = { "Click Refresh" },
-    CurrentOption = { "Click Refresh" },
-    MultipleOptions = false,
-    Flag = "RarityDropdown",
-    Callback = function(opt)
-        local chosen = type(opt) == "table" and opt[1] or opt
-        if chosen and chosen ~= "(No eggs found)" and chosen ~= "Click Refresh" then
-            selectedRarity = chosen
-            Rayfield:Notify({Title="Rarity Selected", Content="Target: "..chosen, Duration=2})
-        end
-    end
-})
-
-EggsTab:CreateButton({
-    Name = "🔄 Refresh Rarities",
-    Callback = function()
-        local rarities = getAvailableRarities()
-        pcall(function() rarityDropdown:Refresh(rarities) end)
-        Rayfield:Notify({Title="Refresh", Content=#eggList.." eggs, "..#rarities.." rarities.", Duration=3})
-    end
-})
-
--- Time you have to press E at the egg
-local waitAtEgg = 2.5
-EggsTab:CreateSlider({
-    Name = "Time to Press E (sec)",
-    Range = {0.5, 10},
-    Increment = 0.5,
+Tab1:CreateSlider({
+    Name = "HoldDuration (másodperc)",
+    Range = {0, 3},
+    Increment = 0.1,
     Suffix = "s",
-    CurrentValue = 2.5,
-    Flag = "WaitAtEggSlider",
-    Callback = function(value) waitAtEgg = value end,
-})
-
-local sideOffset = 4
-EggsTab:CreateSlider({
-    Name = "Stand Distance (studs)",
-    Range = {2, 10},
-    Increment = 1,
-    Suffix = "studs",
-    CurrentValue = 4,
-    Flag = "SideOffsetSlider",
-    Callback = function(value) sideOffset = value end,
-})
-
--- ============================================================
---  AUTO STEAL (TELEPORT ONLY - NO E PRESS)
--- ============================================================
-local autoStealEnabled = false
-local stealing = false
-
-EggsTab:CreateSection("Auto Steal")
-
-EggsTab:CreateToggle({
-    Name = "Auto Steal ON/OFF (Teleport Only)",
-    CurrentValue = false,
-    Flag = "AutoStealToggle",
+    CurrentValue = 0.5,
+    Flag = "HoldDuration",
     Callback = function(value)
-        autoStealEnabled = value
-        if value then
-            Rayfield:Notify({
-                Title = "Auto Steal",
-                Content = "Teleport mode - you press E manually!",
-                Duration = 3
-            })
-        else
-            Rayfield:Notify({Title="Auto Steal", Content="DISABLED", Duration=2})
-        end
-    end
+        State.HoldDuration = value
+    end,
 })
 
--- ============================================================
---  TELEPORT + LOOK AT TARGET
--- ============================================================
-local function tpAndLookAt(targetPos)
-    local hrp = getHRP()
-    if not hrp then return end
+Tab1:CreateButton({
+    Name = "Promptok frissítése most",
+    Callback = function()
+        applyAllPrompts(workspace)
+        Rayfield:Notify({
+            Title = "Utopia",
+            Content = "Promptok frissítve!",
+            Duration = 3,
+        })
+    end,
+})
 
-    local direction = (hrp.Position - targetPos)
-    direction = Vector3.new(direction.X, 0, direction.Z).Unit
-    if direction.Magnitude < 0.01 then
-        direction = Vector3.new(1, 0, 0)
-    end
-    local standPos = targetPos + direction * sideOffset + Vector3.new(0, 2, 0)
+Tab1:CreateSection("Auto Collect")
 
-    hrp.CFrame = CFrame.new(standPos, targetPos)
+Tab1:CreateToggle({
+    Name = "Auto Collect (brainrotok)",
+    CurrentValue = false,
+    Flag = "AutoCollectEnabled",
+    Callback = function(value)
+        State.AutoCollectEnabled = value
+    end,
+})
 
-    local camera = game.Workspace.CurrentCamera
-    if camera then
-        camera.CFrame = CFrame.new(camera.CFrame.Position, targetPos)
-    end
-end
+Tab1:CreateSlider({
+    Name = "Collect Range (studs)",
+    Range = {10, 200},
+    Increment = 5,
+    Suffix = " studs",
+    CurrentValue = 50,
+    Flag = "CollectRange",
+    Callback = function(value)
+        State.CollectRange = value
+    end,
+})
 
--- ============================================================
---  STEAL FLOW (ONLY TELEPORT, NO E PRESS)
--- ============================================================
-local function stealRarity(rarity)
-    if stealing then return end
-    stealing = true
+-- ─── TAB 2: VIZUÁLIS ───
 
-    local hrp = getHRP()
-    if not hrp then stealing = false; return end
+local Tab2 = Window:CreateTab("Vizuális", 4483362458)
 
-    eggList = collectEggs()
+Tab2:CreateSection("ESP")
 
-    local rarityMatches = {}
-    for _, e in ipairs(eggList) do
-        if e.rarity == rarity and e.position then
-            table.insert(rarityMatches, e)
+Tab2:CreateToggle({
+    Name = "Brainrot ESP",
+    CurrentValue = false,
+    Flag = "ESPEnabled",
+    Callback = function(value)
+        State.ESPEnabled = value
+        if not value then
+            clearESP()
         end
-    end
+    end,
+})
 
-    local candidates = (#rarityMatches > 0) and rarityMatches or eggList
+Tab2:CreateButton({
+    Name = "ESP törlése",
+    Callback = function()
+        clearESP()
+    end,
+})
 
-    local target, targetPos = nil, nil
-    local bestDist = math.huge
-    for _, e in ipairs(candidates) do
-        if e.position then
-            local d = (e.position - hrp.Position).Magnitude
-            if d < bestDist then
-                bestDist = d
-                target = e.instance
-                targetPos = e.position
-            end
-        end
-    end
+-- ─── TAB 3: INFO ───
 
-    if not target or not targetPos then
-        Rayfield:Notify({Title="Auto Steal", Content="No egg found.", Duration=3})
-        stealing = false
-        return
-    end
+local Tab3 = Window:CreateTab("Info", 4483362458)
 
-    -- Teleport to the egg
-    tpAndLookAt(targetPos)
+Tab3:CreateSection("Státusz")
 
-    -- Notify the user to press E
-    Rayfield:Notify({
-        Title = "🎯 Press E!",
-        Content = target.Name,
-        Duration = waitAtEgg
-    })
+local statusLabel = Tab3:CreateLabel("Promptok módosítva: 0")
 
-    -- Wait for user to press E
-    task.wait(waitAtEgg)
-
-    -- Return to plot
-    local plotPos = getPlotPosition()
-    if plotPos then
-        local hrp2 = getHRP()
-        if hrp2 then hrp2.CFrame = CFrame.new(plotPos) end
-    end
-
-    -- Short cooldown before next egg
-    task.wait(0.4)
-
-    stealing = false
-end
-
--- Main loop
 task.spawn(function()
-    while task.wait(0.3) do
-        if autoStealEnabled and selectedRarity and not stealing then
-            stealRarity(selectedRarity)
-        end
+    while task.wait(1) do
+        pcall(function()
+            statusLabel:Set(`Promptok módosítva: {State.PromptCount}`)
+        end)
     end
 end)
 
--- ============================================================
---  AUTO REFRESH
--- ============================================================
-task.spawn(function()
-    while task.wait(5) do
-        if not selectedRarity then
-            local rarities = getAvailableRarities()
-            pcall(function() rarityDropdown:Refresh(rarities) end)
-        end
-    end
-end)
+Tab3:CreateSection("Névjegy")
 
-task.spawn(function()
-    task.wait(1.5)
-    local rarities = getAvailableRarities()
-    pcall(function() rarityDropdown:Refresh(rarities) end)
-end)
+Tab3:CreateLabel("Utopia Script v2.0")
+Tab3:CreateLabel("Jump for Brainrots / Animals")
+Tab3:CreateLabel("Készült: Rayfield UI-val")
+
+-- ═══════════════════════════════════════════
+-- ÉRTESÍTÉS
+-- ═══════════════════════════════════════════
 
 Rayfield:Notify({
-    Title = "Kuking Hub",
-    Content = "Loaded! Teleport-only mode. You press E at each egg.",
-    Duration = 5
+    Title = "Utopia Script",
+    Content = "Sikeresen betöltve!",
+    Duration = 5,
 })
+
+print("[Utopia Script] Betöltve!")
