@@ -1,26 +1,30 @@
 --[[
-    ═══════════════════════════════════════════════════════
-              UTOPIA SCRIPT v4.1
-           Job System Auto-Complete
-           Delay: 0.70s | Távolról működik
-    ═══════════════════════════════════════════════════════
+    UTOPIA v5 — Biztonságos (minigame hosszúságú delay)
 --]]
 
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
 local RS = game:GetService("ReplicatedStorage")
 local JobAction = RS:WaitForChild("JobSystem"):WaitForChild("JobAction")
+local Notification = RS:WaitForChild("Remotes"):FindFirstChild("Notification")
 
 -- ═══════════════════════════════════════════
--- ÁLLAPOT
+-- ACTION-ÖNKÉNTI DELAY (minigame valódi hossza)
 -- ═══════════════════════════════════════════
+
+local ACTION_DELAYS = {
+    Quench = 3.5,
+    Trace = 5.0,
+    Hammer = 4.0,
+    Smelt = 6.0,
+    Craft = 4.0,
+    JobTerminal = 2.0,
+}
 
 local State = {
     AutoComplete = false,
-    CompleteDelay = 0.7,        -- alap: 0.70 másodperc
-    Randomize = true,           -- 0.65 - 0.75 között random
-    RandomSpread = 0.05,        -- +- 0.05
-
+    Randomize = true,
+    RandomSpread = 0.8,   -- ± 0.8s (emberibb)
     Actions = {
         Quench = false,
         Trace = false,
@@ -30,49 +34,62 @@ local State = {
         JobTerminal = false,
     },
     Count = 0,
-    LastAction = 0,
+    ExploitDetected = false,
 }
 
 -- ═══════════════════════════════════════════
--- JOBSYSTEM FIGYELŐ
+-- EXPLOIT DETEKTÁLÁS (Notification figyelés)
 -- ═══════════════════════════════════════════
 
-local mtHook
-mtHook = hookmetamethod(game, "__namecall", function(...)
-    if rawequal((...), JobAction) and getnamecallmethod() == "FireServer" then
-        print("[JobAction] FireServer:", ...)
+if Notification then
+    for _, conn in ipairs(getconnections(Notification.OnClientEvent)) do
+        local old; old = hookfunction(conn.Function, function(...)
+            local args = {...}
+            for _, arg in ipairs(args) do
+                if type(arg) == "string" and (arg:lower():find("exploit") or arg:lower():find("too quickly")) then
+                    State.ExploitDetected = true
+                    State.AutoComplete = false  -- AZONNAL leáll
+                    warn("[Utopia] ⚠️ EXPLOIT DETECTED! Auto-Complete leállítva.")
+                end
+            end
+            return old(...)
+        end)
     end
-    return mtHook(...)
-end)
+end
 
 -- ═══════════════════════════════════════════
--- AUTO-COMPLETE LOGIKA
+-- AUTO-COMPLETE
 -- ═══════════════════════════════════════════
 
-local function fireAction(actionName)
+local function getDelay(action)
+    local base = ACTION_DELAYS[action] or 3.0
+    if State.Randomize then
+        return base + (math.random() * State.RandomSpread * 2 - State.RandomSpread)
+    end
+    return base
+end
+
+local function fireAction(action)
     pcall(function()
-        JobAction:FireServer(actionName)
+        JobAction:FireServer(action)
         State.Count = State.Count + 1
-        State.LastAction = tick()
-        print(`[Utopia] {actionName} (#{State.Count})`)
+        print(`[Utopia] {action} (#{State.Count})`)
     end)
 end
 
--- Kiszámolja a következő delay-t (randommal vagy fixen)
-local function getNextDelay()
-    if State.Randomize then
-        local spread = State.RandomSpread
-        return State.CompleteDelay + (math.random() * spread * 2 - spread)
-    end
-    return State.CompleteDelay
-end
-
+-- Sorban halad, NEM egyszerre!
 task.spawn(function()
-    while task.wait(getNextDelay()) do
-        if State.AutoComplete then
+    while task.wait(0.5) do
+        if State.AutoComplete and not State.ExploitDetected then
             for action, enabled in pairs(State.Actions) do
                 if enabled then
-                    fireAction(action)
+                    local delay = getDelay(action)
+                    print(`[Utopia] Vár {delay:.1f}s — {action}`)
+                    task.wait(delay)
+                    if State.AutoComplete and not State.ExploitDetected then
+                        fireAction(action)
+                    end
+                    task.wait(0.5)  -- kis szünet a következő előtt
                 end
             end
         end
@@ -80,24 +97,23 @@ task.spawn(function()
 end)
 
 -- ═══════════════════════════════════════════
--- RAYFIELD UI
+-- UI
 -- ═══════════════════════════════════════════
 
 local Window = Rayfield:CreateWindow({
-    Name = "Utopia Script v4.1",
-    LoadingTitle = "Utopia Script",
-    LoadingSubtitle = "Job Auto-Complete 0.7s",
-    ConfigurationSaving = {
-        Enabled = true,
-        FolderName = "UtopiaScript",
-        FileName = "jobsystem_v41"
-    },
+    Name = "Utopia v5 (Biztonságos)",
+    LoadingTitle = "Utopia",
+    LoadingSubtitle = "Safe Mode",
+    ConfigurationSaving = {Enabled = false},
     KeySystem = false,
 })
 
--- ─── TAB 1: AUTO-COMPLETE ───
+local Tab1 = Window:CreateTab("Auto", 4483362458)
 
-local Tab1 = Window:CreateTab("Auto-Complete", 4483362458)
+Tab1:CreateSection("⚠️ BIZTONSÁGI FIGYELMEZTETÉS")
+Tab1:CreateLabel("• Csak 1 action egyszerre!")
+Tab1:CreateLabel("• A delay a minigame valódi hossza")
+Tab1:CreateLabel("• Ha 'Exploit Detected' jön → leáll")
 
 Tab1:CreateSection("Fő kapcsoló")
 
@@ -107,28 +123,11 @@ Tab1:CreateToggle({
     Flag = "AutoComplete",
     Callback = function(value)
         State.AutoComplete = value
-        Rayfield:Notify({
-            Title = "Utopia",
-            Content = value and "BE — távolról működik!" or "KI",
-            Duration = 3,
-        })
-    end,
-})
-
-Tab1:CreateSlider({
-    Name = "Delay (másodperc)",
-    Range = {0.3, 3},
-    Increment = 0.05,
-    Suffix = "s",
-    CurrentValue = 0.7,
-    Flag = "CompleteDelay",
-    Callback = function(value)
-        State.CompleteDelay = value
     end,
 })
 
 Tab1:CreateToggle({
-    Name = "Randomizálás (0.65 - 0.75)",
+    Name = "Randomizálás (±0.8s)",
     CurrentValue = true,
     Flag = "Randomize",
     Callback = function(value)
@@ -136,139 +135,42 @@ Tab1:CreateToggle({
     end,
 })
 
-Tab1:CreateSlider({
-    Name = "Random szórás (±)",
-    Range = {0, 0.2},
-    Increment = 0.01,
-    Suffix = "s",
-    CurrentValue = 0.05,
-    Flag = "RandomSpread",
-    Callback = function(value)
-        State.RandomSpread = value
-    end,
-})
-
-Tab1:CreateSection("Melyik minigame-eket?")
-
-Tab1:CreateToggle({
-    Name = "Quench",
-    CurrentValue = false,
-    Flag = "ActQuench",
-    Callback = function(value)
-        State.Actions.Quench = value
-    end,
-})
-
-Tab1:CreateToggle({
-    Name = "Trace",
-    CurrentValue = false,
-    Flag = "ActTrace",
-    Callback = function(value)
-        State.Actions.Trace = value
-    end,
-})
-
-Tab1:CreateToggle({
-    Name = "Hammer",
-    CurrentValue = false,
-    Flag = "ActHammer",
-    Callback = function(value)
-        State.Actions.Hammer = value
-    end,
-})
-
-Tab1:CreateToggle({
-    Name = "Smelt",
-    CurrentValue = false,
-    Flag = "ActSmelt",
-    Callback = function(value)
-        State.Actions.Smelt = value
-    end,
-})
-
-Tab1:CreateToggle({
-    Name = "Craft",
-    CurrentValue = false,
-    Flag = "ActCraft",
-    Callback = function(value)
-        State.Actions.Craft = value
-    end,
-})
-
--- ─── TAB 2: MANUÁLIS ───
-
-local Tab2 = Window:CreateTab("Manuális", 4483362458)
-
-Tab2:CreateSection("Egyedi hívás")
-
-local inputAction = "Quench"
-
-Tab2:CreateInput({
-    Name = "Action név",
-    CurrentValue = "Quench",
-    PlaceholderText = "pl. Quench, Trace, Hammer",
-    Flag = "InputAction",
-    Callback = function(value)
-        inputAction = value
-    end,
-})
-
-Tab2:CreateButton({
-    Name = "Küldés",
-    Callback = function()
-        fireAction(inputAction)
-        Rayfield:Notify({
-            Title = "Utopia",
-            Content = `Elküldve: "{inputAction}"`,
-            Duration = 3,
-        })
-    end,
-})
-
-Tab2:CreateSection("Gyors gombok")
+Tab1:CreateSection("Action-ök (csak 1-et kapcsolj!)")
 
 for _, action in ipairs({"Quench", "Trace", "Hammer", "Smelt", "Craft", "JobTerminal"}) do
-    Tab2:CreateButton({
-        Name = action,
-        Callback = function()
-            fireAction(action)
-            Rayfield:Notify({
-                Title = "Utopia",
-                Content = `Elküldve: "{action}"`,
-                Duration = 2,
-            })
+    Tab1:CreateToggle({
+        Name = `{action} ({ACTION_DELAYS[action]}s)`,
+        CurrentValue = false,
+        Flag = "Act_" .. action,
+        Callback = function(value)
+            State.Actions[action] = value
         end,
     })
 end
 
--- ─── TAB 3: INFO ───
+local Tab2 = Window:CreateTab("Státusz", 4483362458)
 
-local Tab3 = Window:CreateTab("Info", 4483362458)
-
-Tab3:CreateSection("Státusz")
-
-local statusLabel = Tab3:CreateLabel("Hívások: 0")
+local statusLabel = Tab2:CreateLabel("Hívások: 0")
+local exploitLabel = Tab2:CreateLabel("Exploit: NEM")
 
 task.spawn(function()
     while task.wait(1) do
         pcall(function()
-            local since = State.LastAction > 0 and string.format("%.1f", tick() - State.LastAction) or "-"
-            statusLabel:Set(`Hívások: {State.Count} | Utolsó: {since}s`)
+            statusLabel:Set(`Hívások: {State.Count}`)
+            exploitLabel:Set(`Exploit: {State.ExploitDetected and "IGEN ⚠️" or "NEM"}`)
         end)
     end
 end)
 
-Tab3:CreateSection("Használat")
-
-Tab3:CreateLabel("1. Auto-Complete BE")
-Tab3:CreateLabel("2. Action(ök) be")
-Tab3:CreateLabel("3. NEM kell odamenni!")
-Tab3:CreateLabel("4. Nézd a konzolt (F9)")
-
-Rayfield:Notify({
-    Title = "Utopia Script v4.1",
-    Content = "Betöltve! 0.70s delay, távolról működik.",
-    Duration = 5,
+Tab2:CreateButton({
+    Name = "Exploit flag törlése",
+    Callback = function()
+        State.ExploitDetected = false
+    end,
 })
 
-print("[Utopia v4.1] Betöltve. Delay: 0.7s. Távolról működik.")
+Rayfield:Notify({
+    Title = "Utopia v5",
+    Content = "Biztonságos mód. Csak 1 action!",
+    Duration = 5,
+})
