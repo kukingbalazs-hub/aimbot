@@ -1,13 +1,11 @@
 --[[
-    UTOPIA v10 — Egy script, mindent lát
+    UTOPIA v11 — Rayfield nélkül
+    Saját egyszerű UI
 --]]
-
-local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
 local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 local LocalPlayer = Players.LocalPlayer
-
 local JobAction = RS:WaitForChild("JobSystem"):WaitForChild("JobAction")
 
 local State = {
@@ -21,23 +19,15 @@ local State = {
 }
 
 -- ═══════════════════════════════════════════
--- Prompt keresés (BasePart ÉS Model alatt is)
+-- PROMPT KERESÉS
 -- ═══════════════════════════════════════════
 
 local function getPromptPosition(prompt)
     local parent = prompt.Parent
     if not parent then return nil end
-
-    -- Ha BasePart, akkor a Position
-    if parent:IsA("BasePart") then
-        return parent.Position
-    end
-
-    -- Ha Model, akkor a PrimaryPart vagy az első BasePart
+    if parent:IsA("BasePart") then return parent.Position end
     if parent:IsA("Model") then
-        if parent.PrimaryPart then
-            return parent.PrimaryPart.Position
-        end
+        if parent.PrimaryPart then return parent.PrimaryPart.Position end
         local part = parent:FindFirstChildWhichIsA("BasePart")
         if part then return part.Position end
     end
@@ -47,9 +37,8 @@ end
 local function getNearestPrompt()
     local char = LocalPlayer.Character
     if not char or not char:FindFirstChild("HumanoidRootPart") then return nil end
-
     local rootPos = char.HumanoidRootPart.Position
-    local nearest, nearestDist, nearestPos = nil, State.Range, nil
+    local nearest, nearestDist = nil, State.Range
 
     for _, d in ipairs(workspace:GetDescendants()) do
         if d:IsA("ProximityPrompt") then
@@ -59,7 +48,6 @@ local function getNearestPrompt()
                 if dist < nearestDist then
                     nearest = d
                     nearestDist = dist
-                    nearestPos = pos
                 end
             end
         end
@@ -68,7 +56,7 @@ local function getNearestPrompt()
 end
 
 -- ═══════════════════════════════════════════
--- Egy lépés
+-- EGY LÉPÉS
 -- ═══════════════════════════════════════════
 
 local function doStep()
@@ -78,32 +66,18 @@ local function doStep()
         return false
     end
 
-    print(`[Utopia] Legközelebbi prompt: "{prompt.Name}" ({dist:.1f} studs)`)
-    print(`[Utopia]   ObjectText: "{prompt.ObjectText}"`)
-    print(`[Utopia]   ActionText: "{prompt.ActionText}"`)
+    print(`[Utopia] Prompt: "{prompt.Name}" ({dist:.1f} studs) — ActionText: "{prompt.ActionText}"`)
 
-    -- 1. Prompt aktiválás
-    print("[Utopia] → InputHoldBegin")
-    pcall(function()
-        prompt:InputHoldBegin()
-    end)
-
+    pcall(function() prompt:InputHoldBegin() end)
     task.wait(State.TriggerHold)
-
-    print("[Utopia] → InputHoldEnd")
-    pcall(function()
-        prompt:InputHoldEnd()
-    end)
-
+    pcall(function() prompt:InputHoldEnd() end)
     task.wait(State.AfterTrigger)
 
-    -- 2. JobAction
-    print(`[Utopia] → JobAction:FireServer("{State.Action}")`)
     pcall(function()
         JobAction:FireServer(State.Action)
         State.Count = State.Count + 1
+        print(`[Utopia] JobAction: {State.Action} (#{State.Count})`)
     end)
-
     return true
 end
 
@@ -116,68 +90,140 @@ task.spawn(function()
 end)
 
 -- ═══════════════════════════════════════════
--- UI
+-- SAJÁT UI (Rayfield nélkül)
 -- ═══════════════════════════════════════════
 
-local Window = Rayfield:CreateWindow({
-    Name = "Utopia v10",
-    LoadingTitle = "Utopia",
-    LoadingSubtitle = "Single Script Edition",
-    ConfigurationSaving = {Enabled = false},
-    KeySystem = false,
-})
+local gui = Instance.new("ScreenGui")
+gui.Name = "UtopiaGUI"
+gui.ResetOnSpawn = false
+gui.Parent = LocalPlayer:WaitForChild("PlayerGui")
 
-local Tab = Window:CreateTab("Auto", 4483362458)
+-- Fő frame
+local main = Instance.new("Frame")
+main.Size = UDim2.new(0, 260, 0, 300)
+main.Position = UDim2.new(0, 20, 0, 100)
+main.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
+main.BorderSizePixel = 0
+main.Active = true
+main.Draggable = true
+main.Parent = gui
 
-Tab:CreateDropdown({
-    Name = "Action",
-    Options = {"Quench", "Trace", "Hammer", "Smelt", "Craft", "JobTerminal"},
-    CurrentOption = {"Smelt"},
-    Flag = "ActionSelect",
-    Callback = function(option)
-        State.Action = option[1] or option
-    end,
-})
+local corner = Instance.new("UICorner")
+corner.CornerRadius = UDim.new(0, 8)
+corner.Parent = main
 
-Tab:CreateSlider({
-    Name = "Hatótáv (studs)",
-    Range = {5, 100},
-    Increment = 1,
-    Suffix = " studs",
-    CurrentValue = 20,
-    Flag = "Range",
-    Callback = function(value)
-        State.Range = value
-    end,
-})
+-- Cím
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, 0, 0, 35)
+title.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
+title.BorderSizePixel = 0
+title.Text = "Utopia v11"
+title.TextColor3 = Color3.fromRGB(255, 255, 255)
+title.Font = Enum.Font.GothamBold
+title.TextSize = 16
+title.Parent = main
 
-Tab:CreateToggle({
-    Name = "BE",
-    CurrentValue = false,
-    Flag = "Enabled",
-    Callback = function(value)
-        State.Enabled = value
-    end,
-})
+local titleCorner = Instance.new("UICorner")
+titleCorner.CornerRadius = UDim.new(0, 8)
+titleCorner.Parent = title
 
-Tab:CreateButton({
-    Name = "Egyszeri lépés (most)",
-    Callback = function()
-        doStep()
-    end,
-})
+-- Action dropdown (egyszerű gombok)
+local actions = {"Quench", "Trace", "Hammer", "Smelt", "Craft", "JobTerminal"}
+local yPos = 45
 
-local statusLabel = Tab:CreateLabel("Hívások: 0")
-task.spawn(function()
-    while task.wait(1) do
-        pcall(function()
-            statusLabel:Set(`Hívások: {State.Count}`)
-        end)
+for _, action in ipairs(actions) do
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(1, -20, 0, 28)
+    btn.Position = UDim2.new(0, 10, 0, yPos)
+    btn.BackgroundColor3 = (action == State.Action) and Color3.fromRGB(0, 120, 215) or Color3.fromRGB(50, 50, 60)
+    btn.Text = action
+    btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    btn.Font = Enum.Font.Gotham
+    btn.TextSize = 13
+    btn.Parent = main
+
+    local bc = Instance.new("UICorner")
+    bc.CornerRadius = UDim.new(0, 5)
+    bc.Parent = btn
+
+    btn.MouseButton1Click:Connect(function()
+        State.Action = action
+        -- Frissítés
+        for _, child in ipairs(main:GetChildren()) do
+            if child:IsA("TextButton") and child ~= btn then
+                if child.Name == "ActionBtn" then
+                    child.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
+                end
+            end
+        end
+        btn.BackgroundColor3 = Color3.fromRGB(0, 120, 215)
+        print(`[Utopia] Action: {action}`)
+    end)
+    btn.Name = "ActionBtn"
+
+    yPos = yPos + 32
+end
+
+-- BE/KI gomb
+local toggleBtn = Instance.new("TextButton")
+toggleBtn.Size = UDim2.new(1, -20, 0, 35)
+toggleBtn.Position = UDim2.new(0, 10, 0, yPos + 5)
+toggleBtn.BackgroundColor3 = Color3.fromRGB(180, 50, 50)
+toggleBtn.Text = "BE (kikapcsolva)"
+toggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+toggleBtn.Font = Enum.Font.GothamBold
+toggleBtn.TextSize = 14
+toggleBtn.Parent = main
+
+local tbc = Instance.new("UICorner")
+tbc.CornerRadius = UDim.new(0, 5)
+tbc.Parent = toggleBtn
+
+toggleBtn.MouseButton1Click:Connect(function()
+    State.Enabled = not State.Enabled
+    if State.Enabled then
+        toggleBtn.Text = "BE (bekapcsolva)"
+        toggleBtn.BackgroundColor3 = Color3.fromRGB(50, 180, 50)
+    else
+        toggleBtn.Text = "BE (kikapcsolva)"
+        toggleBtn.BackgroundColor3 = Color3.fromRGB(180, 50, 50)
     end
 end)
 
-Rayfield:Notify({
-    Title = "Utopia v10",
-    Content = "CSAK EZT futtasd! Menj a Smelt-hez, nyomd meg az Egyszeri lépést.",
-    Duration = 5,
-})
+-- Egyszeri gomb
+local stepBtn = Instance.new("TextButton")
+stepBtn.Size = UDim2.new(1, -20, 0, 30)
+stepBtn.Position = UDim2.new(0, 10, 0, yPos + 45)
+stepBtn.BackgroundColor3 = Color3.fromRGB(80, 80, 100)
+stepBtn.Text = "Egyszeri lépés (most)"
+stepBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+stepBtn.Font = Enum.Font.Gotham
+stepBtn.TextSize = 13
+stepBtn.Parent = main
+
+local sbc = Instance.new("UICorner")
+sbc.CornerRadius = UDim.new(0, 5)
+sbc.Parent = stepBtn
+
+stepBtn.MouseButton1Click:Connect(function()
+    doStep()
+end)
+
+-- Státusz
+local statusLabel = Instance.new("TextLabel")
+statusLabel.Size = UDim2.new(1, -20, 0, 20)
+statusLabel.Position = UDim2.new(0, 10, 1, -25)
+statusLabel.BackgroundTransparency = 1
+statusLabel.Text = "Hívások: 0"
+statusLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+statusLabel.Font = Enum.Font.Gotham
+statusLabel.TextSize = 12
+statusLabel.Parent = main
+
+task.spawn(function()
+    while task.wait(1) do
+        statusLabel.Text = `Hívások: {State.Count}`
+    end
+end)
+
+print("[Utopia v11] Betöltve! Bal felső sarokban a UI.")
