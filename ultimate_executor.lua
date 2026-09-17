@@ -1,7 +1,7 @@
 --[[
     ═══════════════════════════════════════════════════════
-              UTOPIA SCRIPT v6
-        Remote Job Complete (no walking)
+              UTOPIA SCRIPT v7
+         Job System Auto-Complete (FAST)
     ═══════════════════════════════════════════════════════
 --]]
 
@@ -19,15 +19,15 @@ local JobAction = RS:WaitForChild("JobSystem"):WaitForChild("JobAction")
 
 local State = {
     AutoComplete = false,
-    TriggerPrompts = true,  -- aktiválja-e a promptokat is
-    MinDelay = 3,
-    MaxDelay = 8,
+    TriggerPrompts = true,
+
+    -- GYORS beállítások
+    MinDelay = 1,       -- minimum 1 másodperc
+    MaxDelay = 2,       -- maximum 2 másodperc
+    BetweenActions = 0.5,
     Randomize = true,
 
-    -- Action → ProximityPrompt mappa
-    -- (auto-felfedezés a workspace.ECONOMY alatt)
     Stations = {},
-
     Count = 0,
     LastAction = 0,
 }
@@ -48,9 +48,6 @@ end)
 -- STATION FELFEDEZÉS
 -- ═══════════════════════════════════════════
 
--- Megkeresi az összes job station ProximityPrompt-ját
--- és megpróbálja kitalálni az action nevét a szülő mappából
-
 local ACTION_KEYWORDS = {
     Quench = "Quench",
     Hammer = "Hammer",
@@ -63,7 +60,6 @@ local ACTION_KEYWORDS = {
 }
 
 local function detectActionName(obj)
-    -- Végigmegyünk az objektum összes ősén, és megnézzük a nevüket
     local current = obj
     while current and current ~= workspace do
         local nameLower = current.Name:lower()
@@ -116,7 +112,6 @@ local function getRandomDelay()
     return State.MinDelay
 end
 
--- ProximityPrompt aktiválása távolról
 local function triggerPrompt(prompt)
     if not prompt or not prompt.Parent then return false end
     local ok = pcall(function()
@@ -127,7 +122,6 @@ local function triggerPrompt(prompt)
     return ok
 end
 
--- JobAction küldése
 local function fireAction(actionName)
     pcall(function()
         JobAction:FireServer(actionName)
@@ -137,22 +131,19 @@ local function fireAction(actionName)
     end)
 end
 
--- Egy station teljes végrehajtása (trigger + complete)
 local function runStation(station)
     if not station or not station.prompt then return end
 
-    -- 1. Prompt aktiválása (minigame indítás)
     if State.TriggerPrompts then
         triggerPrompt(station.prompt)
-        task.wait(0.3)  -- várjunk, hátha megnyílik a UI
+        task.wait(0.1)  -- rövidebb várakozás
     end
 
-    -- 2. JobAction küldése (minigame befejezés)
     fireAction(station.action)
 end
 
 -- ═══════════════════════════════════════════
--- AUTO-COMPLETE CIKLUS
+-- AUTO-COMPLETE CIKLUS (GYORS)
 -- ═══════════════════════════════════════════
 
 local enabledActions = {
@@ -165,13 +156,14 @@ local enabledActions = {
 }
 
 task.spawn(function()
-    while task.wait(0.5) do
+    while task.wait(0.2) do
         if State.AutoComplete then
             if tick() - State.LastAction >= State.MinDelay then
                 for _, station in ipairs(State.Stations) do
                     if enabledActions[station.action] then
                         task.wait(getRandomDelay())
                         runStation(station)
+                        task.wait(State.BetweenActions)
                     end
                 end
             end
@@ -184,13 +176,13 @@ end)
 -- ═══════════════════════════════════════════
 
 local Window = Rayfield:CreateWindow({
-    Name = "Utopia Script v6",
+    Name = "Utopia Script v7",
     LoadingTitle = "Utopia Script",
-    LoadingSubtitle = "Remote Job Complete",
+    LoadingSubtitle = "FAST Job Auto-Complete",
     ConfigurationSaving = {
         Enabled = true,
         FolderName = "UtopiaScript",
-        FileName = "jobsystem_v6"
+        FileName = "jobsystem_v7"
     },
     KeySystem = false,
 })
@@ -202,21 +194,21 @@ local Tab1 = Window:CreateTab("Auto-Complete", 4483362458)
 Tab1:CreateSection("Fő kapcsoló")
 
 Tab1:CreateToggle({
-    Name = "Auto-Complete BE (távolról)",
+    Name = "Auto-Complete BE",
     CurrentValue = false,
     Flag = "AutoComplete",
     Callback = function(value)
         State.AutoComplete = value
         Rayfield:Notify({
             Title = "Utopia",
-            Content = value and "Auto-Complete BE — nem kell odamenni!" or "Auto-Complete KI",
-            Duration = 3,
+            Content = value and "BE — gyors mód (1-2s)" or "KI",
+            Duration = 2,
         })
     end,
 })
 
 Tab1:CreateToggle({
-    Name = "Prompt aktiválás is (minigame indítás)",
+    Name = "Prompt aktiválás (minigame indítás)",
     CurrentValue = true,
     Flag = "TriggerPrompts",
     Callback = function(value)
@@ -224,14 +216,14 @@ Tab1:CreateToggle({
     end,
 })
 
-Tab1:CreateSection("Időzítés")
+Tab1:CreateSection("Időzítés (gyors)")
 
 Tab1:CreateSlider({
     Name = "Minimum késleltetés",
-    Range = {1, 30},
-    Increment = 0.5,
+    Range = {0.1, 10},
+    Increment = 0.1,
     Suffix = "s",
-    CurrentValue = 3,
+    CurrentValue = 1,
     Flag = "MinDelay",
     Callback = function(value)
         State.MinDelay = value
@@ -240,13 +232,25 @@ Tab1:CreateSlider({
 
 Tab1:CreateSlider({
     Name = "Maximum késleltetés",
-    Range = {1, 60},
-    Increment = 0.5,
+    Range = {0.1, 15},
+    Increment = 0.1,
     Suffix = "s",
-    CurrentValue = 8,
+    CurrentValue = 2,
     Flag = "MaxDelay",
     Callback = function(value)
         State.MaxDelay = value
+    end,
+})
+
+Tab1:CreateSlider({
+    Name = "Két action között",
+    Range = {0, 5},
+    Increment = 0.1,
+    Suffix = "s",
+    CurrentValue = 0.5,
+    Flag = "BetweenActions",
+    Callback = function(value)
+        State.BetweenActions = value
     end,
 })
 
@@ -276,19 +280,13 @@ end
 
 local Tab2 = Window:CreateTab("Station-ök", 4483362458)
 
-Tab2:CreateSection("Felfedezett station-ök")
-
 local stationLabel = Tab2:CreateLabel("Felfedezve: 0")
-
-local function updateStationLabel()
-    pcall(function()
-        stationLabel:Set(`Felfedezve: {#State.Stations}`)
-    end)
-end
 
 task.spawn(function()
     while task.wait(2) do
-        updateStationLabel()
+        pcall(function()
+            stationLabel:Set(`Felfedezve: {#State.Stations}`)
+        end)
     end
 end)
 
@@ -296,11 +294,10 @@ Tab2:CreateButton({
     Name = "Újra felfedezés",
     Callback = function()
         discoverStations()
-        updateStationLabel()
         Rayfield:Notify({
             Title = "Utopia",
             Content = `Felfedezve: {#State.Stations} station`,
-            Duration = 3,
+            Duration = 2,
         })
     end,
 })
@@ -319,11 +316,11 @@ Tab2:CreateButton({
 
 local Tab3 = Window:CreateTab("Manuális", 4483362458)
 
-Tab3:CreateSection("Gyors gombok")
+Tab3:CreateSection("Gyors gombok (azonnali)")
 
 for _, action in ipairs({"Quench", "Trace", "Hammer", "Smelt", "Craft", "JobTerminal"}) do
     Tab3:CreateButton({
-        Name = `{action} (azonnali)`,
+        Name = action,
         Callback = function()
             fireAction(action)
             Rayfield:Notify({
@@ -335,28 +332,9 @@ for _, action in ipairs({"Quench", "Trace", "Hammer", "Smelt", "Craft", "JobTerm
     })
 end
 
-Tab3:CreateSection("Prompt teszt")
-
-Tab3:CreateButton({
-    Name = "Összes prompt aktiválása",
-    Callback = function()
-        for _, s in ipairs(State.Stations) do
-            triggerPrompt(s.prompt)
-            task.wait(0.2)
-        end
-        Rayfield:Notify({
-            Title = "Utopia",
-            Content = "Promptok aktiválva!",
-            Duration = 2,
-        })
-    end,
-})
-
 -- ─── TAB 4: INFO ───
 
 local Tab4 = Window:CreateTab("Info", 4483362458)
-
-Tab4:CreateSection("Státusz")
 
 local statusLabel = Tab4:CreateLabel("Hívások: 0")
 
@@ -368,16 +346,16 @@ task.spawn(function()
     end
 end)
 
-Tab4:CreateSection("Hogyan működik?")
+Tab4:CreateSection("Beállítás")
 
-Tab4:CreateLabel("1. Auto-Complete BE")
-Tab4:CreateLabel("2. Nem kell odamenni!")
-Tab4:CreateLabel("3. A script aktiválja a promptot + JobAction-t")
+Tab4:CreateLabel("• Alap: 1-2s (gyors)")
+Tab4:CreateLabel("• Ha bannt kapsz: emelj 3-5s-re")
+Tab4:CreateLabel("• Ha nem működik: kapcsold ki a Prompt-ot")
 
 Rayfield:Notify({
-    Title = "Utopia Script v6",
-    Content = "Betöltve! Nézd a konzolt (F9).",
-    Duration = 5,
+    Title = "Utopia Script v7",
+    Content = "Betöltve! Gyors mód (1-2s).",
+    Duration = 4,
 })
 
-print("[Utopia v6] Betöltve.")
+print("[Utopia v7] Betöltve. Gyors mód.")
