@@ -1,7 +1,7 @@
 --[[
     ═══════════════════════════════════════════════════════
-              UTOPIA SCRIPT v4.2
-              Delay: 0.90s
+              UTOPIA SCRIPT v8
+        2 másodpercenként 1 action — NEM SPAM
     ═══════════════════════════════════════════════════════
 --]]
 
@@ -11,18 +11,10 @@ local RS = game:GetService("ReplicatedStorage")
 local JobAction = RS:WaitForChild("JobSystem"):WaitForChild("JobAction")
 
 local State = {
-    AutoComplete = false,
-    CompleteDelay = 0.9,
-    Randomize = true,
-    RandomSpread = 0.05,
-    Actions = {
-        Quench = false,
-        Trace = false,
-        Hammer = false,
-        Smelt = false,
-        Craft = false,
-        JobTerminal = false,
-    },
+    Enabled = false,
+    Action = "Quench",      -- CSAK EGY action
+    Interval = 2.0,         -- 2 másodperc
+    Randomize = true,       -- kis randomizálás
     Count = 0,
 }
 
@@ -35,113 +27,128 @@ mtHook = hookmetamethod(game, "__namecall", function(...)
     return mtHook(...)
 end)
 
-local function fireAction(actionName)
+-- Egy action küldése
+local function fireAction()
     pcall(function()
-        JobAction:FireServer(actionName)
+        JobAction:FireServer(State.Action)
         State.Count = State.Count + 1
-        print(`[Utopia] {actionName} (#{State.Count})`)
+        print(`[Utopia] {State.Action} (#{State.Count}) — vár {State.Interval}s`)
     end)
 end
 
-local function getNextDelay()
-    if State.Randomize then
-        return State.CompleteDelay + (math.random() * State.RandomSpread * 2 - State.RandomSpread)
-    end
-    return State.CompleteDelay
-end
-
+-- 2 másodpercenként EGY action
 task.spawn(function()
-    while task.wait(getNextDelay()) do
-        if State.AutoComplete then
-            for action, enabled in pairs(State.Actions) do
-                if enabled then
-                    fireAction(action)
-                end
-            end
+    while task.wait(State.Interval) do
+        if State.Enabled then
+            fireAction()
         end
     end
 end)
 
 -- ═══════════════════════════════════════════
--- RAYFIELD UI
+-- UI
 -- ═══════════════════════════════════════════
 
 local Window = Rayfield:CreateWindow({
-    Name = "Utopia v4.2",
-    LoadingTitle = "Utopia Script",
-    LoadingSubtitle = "Delay 0.90s",
+    Name = "Utopia v8",
+    LoadingTitle = "Utopia",
+    LoadingSubtitle = "1 Action / 2s",
     ConfigurationSaving = {Enabled = false},
     KeySystem = false,
 })
 
 local Tab1 = Window:CreateTab("Auto", 4483362458)
 
+Tab1:CreateSection("Fő kapcsoló")
+
 Tab1:CreateToggle({
-    Name = "Auto-Complete BE",
+    Name = "BE (2s / 1 action)",
     CurrentValue = false,
-    Flag = "AutoComplete",
+    Flag = "Enabled",
     Callback = function(value)
-        State.AutoComplete = value
+        State.Enabled = value
+        if value then
+            Rayfield:Notify({
+                Title = "Utopia",
+                Content = `BE — {State.Action} 2 másodpercenként`,
+                Duration = 3,
+            })
+        end
     end,
 })
 
 Tab1:CreateSlider({
-    Name = "Delay (másodperc)",
-    Range = {0.3, 3},
-    Increment = 0.05,
+    Name = "Intervallum (másodperc)",
+    Range = {1, 10},
+    Increment = 0.1,
     Suffix = "s",
-    CurrentValue = 0.9,
-    Flag = "CompleteDelay",
+    CurrentValue = 2.0,
+    Flag = "Interval",
     Callback = function(value)
-        State.CompleteDelay = value
+        State.Interval = value
     end,
 })
 
-Tab1:CreateToggle({
-    Name = "Randomizálás",
-    CurrentValue = true,
-    Flag = "Randomize",
-    Callback = function(value)
-        State.Randomize = value
-    end,
-})
+Tab1:CreateSection("Melyik action-t csinálja? (csak 1!)")
 
-Tab1:CreateSection("Action-ök")
+local actionButtons = {}
 
 for _, action in ipairs({"Quench", "Trace", "Hammer", "Smelt", "Craft", "JobTerminal"}) do
-    Tab1:CreateToggle({
+    local btn
+    btn = Tab1:CreateButton({
         Name = action,
-        CurrentValue = false,
-        Flag = "Act_" .. action,
-        Callback = function(value)
-            State.Actions[action] = value
+        Callback = function()
+            State.Action = action
+            -- Frissítés
+            for name, b in pairs(actionButtons) do
+                pcall(function()
+                    b:Set(`{name}{name == action and " ✓" or ""}`)
+                end)
+            end
+            Rayfield:Notify({
+                Title = "Utopia",
+                Content = `Action: {action}`,
+                Duration = 2,
+            })
         end,
     })
+    actionButtons[action] = btn
 end
+
+-- ─── TAB 2: MANUÁLIS ───
 
 local Tab2 = Window:CreateTab("Manuális", 4483362458)
 
-for _, action in ipairs({"Quench", "Trace", "Hammer", "Smelt", "Craft", "JobTerminal"}) do
-    Tab2:CreateButton({
-        Name = action,
-        Callback = function()
-            fireAction(action)
-        end,
-    })
-end
+Tab2:CreateButton({
+    Name = "Egyszeri action (most)",
+    Callback = function()
+        fireAction()
+    end,
+})
+
+-- ─── TAB 3: INFO ───
 
 local Tab3 = Window:CreateTab("Info", 4483362458)
+
 local statusLabel = Tab3:CreateLabel("Hívások: 0")
+local actionLabel = Tab3:CreateLabel("Action: Quench")
+
 task.spawn(function()
     while task.wait(1) do
         pcall(function()
             statusLabel:Set(`Hívások: {State.Count}`)
+            actionLabel:Set(`Action: {State.Action}`)
         end)
     end
 end)
 
+Tab3:CreateSection("Miért nem spam?")
+Tab3:CreateLabel("• Csak 1 action")
+Tab3:CreateLabel("• 2 másodperc közöttük")
+Tab3:CreateLabel("• Nem ismétli az összeset")
+
 Rayfield:Notify({
-    Title = "Utopia v4.2",
-    Content = "Betöltve. Delay: 0.90s",
+    Title = "Utopia v8",
+    Content = "Betöltve. Válassz 1 action-t!",
     Duration = 4,
 })
