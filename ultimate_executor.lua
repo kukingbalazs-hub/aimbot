@@ -1,25 +1,14 @@
 --[[
     ═══════════════════════════════════════════════════════
-                    UTOPIA SCRIPT
-              Jump for Brainrots / Animals
-              Rayfield UI Edition
+              UTOPIA SCRIPT v3
+           Minigame Skip + Rayfield UI
     ═══════════════════════════════════════════════════════
 --]]
 
--- ═══════════════════════════════════════════
--- RAYFIELD BETÖLTÉSE
--- ═══════════════════════════════════════════
-
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
-
--- ═══════════════════════════════════════════
--- SZOLGÁLTATÁSOK
--- ═══════════════════════════════════════════
 
 local RS = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
-
 local LocalPlayer = Players.LocalPlayer
 
 -- ═══════════════════════════════════════════
@@ -31,19 +20,171 @@ local State = {
     PromptEnabled = false,
     HoldDuration = 0.5,
 
-    -- Auto Collect
-    AutoCollectEnabled = false,
-    CollectRange = 50,
+    -- Minigame Skip
+    AutoSkipEnabled = false,
+    SkipDelay = 0.1,
 
-    -- ESP
-    ESPEnabled = false,
+    -- Logolás
+    LogEnabled = true,
 
     -- Stats
     PromptCount = 0,
+    SkipCount = 0,
 }
 
 -- ═══════════════════════════════════════════
--- PROXIMITY PROMPT KEZELŐ
+-- 1. MINIGAME UI KERESÉSE
+-- ═══════════════════════════════════════════
+
+-- A minigame-ek nevei (ezeket keressük a PlayerGui-ban)
+local MINIGAME_NAMES = {
+    "Trace", "Arc", "Quench", "Pull", "Hammer", "Smelt", "Craft",
+    "Minigame", "MiniGame", "Forge", "Anvil", "Water", "Job"
+}
+
+local function findMinigameUI()
+    local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
+    if not playerGui then return {} end
+
+    local found = {}
+    for _, gui in ipairs(playerGui:GetDescendants()) do
+        if gui:IsA("ScreenGui") or gui:IsA("Frame") then
+            local nameLower = gui.Name:lower()
+            for _, keyword in ipairs(MINIGAME_NAMES) do
+                if nameLower:find(keyword:lower()) then
+                    table.insert(found, gui)
+                    break
+                end
+            end
+        end
+    end
+    return found
+end
+
+-- ═══════════════════════════════════════════
+-- 2. REMOTE LOGOLÁS (hogy megtaláljuk a completion remote-ot)
+-- ═══════════════════════════════════════════
+
+local Remotes = RS:FindFirstChild("Remotes")
+
+if Remotes and State.LogEnabled then
+    for _, remote in ipairs(Remotes:GetChildren()) do
+        if remote:IsA("RemoteEvent") then
+            -- FireServer hook
+            local mtHook
+            mtHook = hookmetamethod(game, "__namecall", function(...)
+                if rawequal((...), remote) and getnamecallmethod() == "FireServer" then
+                    print(`[REMOTE] {remote.Name}:FireServer`, ...)
+                end
+                return mtHook(...)
+            end)
+        end
+    end
+end
+
+-- ═══════════════════════════════════════════
+-- 3. MINIGAME AUTO-SKIP
+-- ═══════════════════════════════════════════
+
+-- Módszer A: A minigame UI befejezése kliensoldalon
+-- (ha a szerver nem ellenőrzi, ez elég)
+
+local function attemptSkipUI(gui)
+    if not gui then return false end
+
+    local skipped = false
+
+    -- Keressünk egy "Complete" / "Finish" / "Done" gombot vagy értéket
+    for _, d in ipairs(gui:GetDescendants()) do
+        -- 1. Gomb megnyomása
+        if d:IsA("TextButton") or d:IsA("ImageButton") then
+            local nameLower = d.Name:lower()
+            if nameLower:find("complete") or nameLower:find("finish") or
+               nameLower:find("done") or nameLower:find("submit") then
+                pcall(function()
+                    d:Activate()
+                end)
+                skipped = true
+            end
+        end
+
+        -- 2. Érték beállítása a végére (pl. progress bar)
+        if d:IsA("NumberValue") or d:IsA("IntValue") then
+            local nameLower = d.Name:lower()
+            if nameLower:find("progress") or nameLower:find("percent") or
+               nameLower:find("complete") then
+                pcall(function()
+                    d.Value = 100
+                end)
+                skipped = true
+            end
+        end
+
+        -- 3. Bool érték beállítása true-ra
+        if d:IsA("BoolValue") then
+            local nameLower = d.Name:lower()
+            if nameLower:find("complete") or nameLower:find("done") or
+               nameLower:find("finish") then
+                pcall(function()
+                    d.Value = true
+                end)
+                skipped = true
+            end
+        end
+    end
+
+    return skipped
+end
+
+-- Módszer B: Az összes RemoteEvent "kényszerített" hívása
+-- (ha a szerver vár egy jelet, de nem ellenőrzi a részleteket)
+
+local function attemptSkipRemote()
+    if not Remotes then return false end
+
+    local success = false
+
+    for _, remote in ipairs(Remotes:GetChildren()) do
+        if remote:IsA("RemoteEvent") then
+            local nameLower = remote.Name:lower()
+
+            -- Olyan remote-okat keresünk, amik "complete", "finish", "done",
+            -- "submit", "craft", "minigame" szavakat tartalmaznak
+            if nameLower:find("complete") or nameLower:find("finish") or
+               nameLower:find("done") or nameLower:find("submit") or
+               nameLower:find("minigame") or nameLower:find("craft") then
+                pcall(function()
+                    remote:FireServer()
+                    success = true
+                end)
+            end
+        end
+    end
+
+    return success
+end
+
+-- Auto Skip ciklus
+task.spawn(function()
+    while task.wait(State.SkipDelay) do
+        if State.AutoSkipEnabled then
+            local guis = findMinigameUI()
+            for _, gui in ipairs(guis) do
+                if gui.Visible then
+                    if attemptSkipUI(gui) then
+                        State.SkipCount = State.SkipCount + 1
+                        print(`[Utopia] Minigame skip kísérlet: {gui.Name}`)
+                    end
+                end
+            end
+
+            attemptSkipRemote()
+        end
+    end
+end)
+
+-- ═══════════════════════════════════════════
+-- 4. PROXIMITY PROMPT KEZELŐ
 -- ═══════════════════════════════════════════
 
 local function applyPrompt(prompt)
@@ -63,7 +204,6 @@ local function applyAllPrompts(root)
     end
 end
 
--- Új promptok figyelése
 workspace.DescendantAdded:Connect(function(d)
     if not State.PromptEnabled then return end
     if d:IsA("ProximityPrompt") then
@@ -72,7 +212,6 @@ workspace.DescendantAdded:Connect(function(d)
     end
 end)
 
--- Folyamatos frissítés
 task.spawn(function()
     while task.wait(0.5) do
         if State.PromptEnabled then
@@ -82,114 +221,133 @@ task.spawn(function()
 end)
 
 -- ═══════════════════════════════════════════
--- AUTO COLLECT
--- ═══════════════════════════════════════════
-
-local function getNearbyPrompts(range)
-    local found = {}
-    local char = LocalPlayer.Character
-    if not char or not char:FindFirstChild("HumanoidRootPart") then return found end
-
-    local rootPos = char.HumanoidRootPart.Position
-
-    for _, d in ipairs(workspace:GetDescendants()) do
-        if d:IsA("ProximityPrompt") then
-            local parent = d.Parent
-            if parent and parent:IsA("BasePart") then
-                local dist = (parent.Position - rootPos).Magnitude
-                if dist <= range then
-                    table.insert(found, {prompt = d, dist = dist, part = parent})
-                end
-            end
-        end
-    end
-    return found
-end
-
-task.spawn(function()
-    while task.wait(0.2) do
-        if State.AutoCollectEnabled then
-            local nearby = getNearbyPrompts(State.CollectRange)
-            for _, info in ipairs(nearby) do
-                pcall(function()
-                    info.prompt:InputHoldBegin()
-                    task.wait(0.05)
-                    info.prompt:InputHoldEnd()
-                end)
-            end
-        end
-    end
-end)
-
--- ═══════════════════════════════════════════
--- ESP
--- ═══════════════════════════════════════════
-
-local espObjects = {}
-
-local function createESP(part, color)
-    if not part or not part:IsA("BasePart") then return end
-    if espObjects[part] then return end
-
-    local box = Instance.new("BoxHandleAdornment")
-    box.Size = part.Size
-    box.Adornee = part
-    box.AlwaysOnTop = true
-    box.ZIndex = 5
-    box.Transparency = 0.5
-    box.Color3 = color or Color3.fromRGB(0, 255, 100)
-    box.Parent = part
-
-    espObjects[part] = box
-end
-
-local function clearESP()
-    for part, box in pairs(espObjects) do
-        if box and box.Parent then
-            box:Destroy()
-        end
-    end
-    espObjects = {}
-end
-
-task.spawn(function()
-    while task.wait(0.5) do
-        if State.ESPEnabled then
-            for _, d in ipairs(workspace:GetDescendants()) do
-                if d:IsA("ProximityPrompt") and d.Parent and d.Parent:IsA("BasePart") then
-                    createESP(d.Parent, Color3.fromRGB(0, 255, 100))
-                end
-            end
-        end
-    end
-end)
-
--- ═══════════════════════════════════════════
--- RAYFIELD UI
+-- 5. RAYFIELD UI
 -- ═══════════════════════════════════════════
 
 local Window = Rayfield:CreateWindow({
-    Name = "Utopia Script",
+    Name = "Utopia Script v3",
     LoadingTitle = "Utopia Script",
-    LoadingSubtitle = "Jump for Brainrots",
+    LoadingSubtitle = "Minigame Skip Edition",
     ConfigurationSaving = {
         Enabled = true,
         FolderName = "UtopiaScript",
         FileName = "config"
     },
-    Discord = {
-        Enabled = false,
-    },
     KeySystem = false,
 })
 
--- ─── TAB 1: INTERAKCIÓK ───
+-- ─── TAB 1: MINIGAME SKIP ───
 
-local Tab1 = Window:CreateTab("Interakciók", 4483362458)
+local Tab1 = Window:CreateTab("Minigame Skip", 4483362458)
 
-Tab1:CreateSection("ProximityPrompt")
+Tab1:CreateSection("Auto Skip")
 
 Tab1:CreateToggle({
+    Name = "Auto Skip (minigame-ek)",
+    CurrentValue = false,
+    Flag = "AutoSkipEnabled",
+    Callback = function(value)
+        State.AutoSkipEnabled = value
+        if value then
+            Rayfield:Notify({
+                Title = "Utopia",
+                Content = "Auto Skip bekapcsolva. Figyeld a konzolt!",
+                Duration = 3,
+            })
+        end
+    end,
+})
+
+Tab1:CreateSlider({
+    Name = "Skip Delay (másodperc)",
+    Range = {0.05, 1},
+    Increment = 0.05,
+    Suffix = "s",
+    CurrentValue = 0.1,
+    Flag = "SkipDelay",
+    Callback = function(value)
+        State.SkipDelay = value
+    end,
+})
+
+Tab1:CreateButton({
+    Name = "Egyszeri Skip kísérlet",
+    Callback = function()
+        local guis = findMinigameUI()
+        local count = 0
+        for _, gui in ipairs(guis) do
+            if attemptSkipUI(gui) then
+                count = count + 1
+            end
+        end
+        if attemptSkipRemote() then
+            count = count + 1
+        end
+        Rayfield:Notify({
+            Title = "Utopia",
+            Content = `Skip kísérlet: {count} művelet`,
+            Duration = 3,
+        })
+    end,
+})
+
+Tab1:CreateSection("Diagnosztika")
+
+Tab1:CreateButton({
+    Name = "Minigame UI-k listázása",
+    Callback = function()
+        local guis = findMinigameUI()
+        print(`[Utopia] Talált minigame UI-k: {#guis}`)
+        for _, gui in ipairs(guis) do
+            print(`  - {gui:GetFullName()} (Visible: {gui.Visible})`)
+        end
+        Rayfield:Notify({
+            Title = "Utopia",
+            Content = `Talált UI-k: {#guis} (konzolban részletek)`,
+            Duration = 3,
+        })
+    end,
+})
+
+Tab1:CreateButton({
+    Name = "Remote-ok listázása",
+    Callback = function()
+        if not Remotes then
+            Rayfield:Notify({
+                Title = "Utopia",
+                Content = "Remotes mappa nem található!",
+                Duration = 3,
+            })
+            return
+        end
+        print("[Utopia] Remote-ok listája:")
+        for _, remote in ipairs(Remotes:GetChildren()) do
+            print(`  - {remote.Name} ({remote.ClassName})`)
+        end
+        Rayfield:Notify({
+            Title = "Utopia",
+            Content = "Remote-ok listázva a konzolban (F9)",
+            Duration = 3,
+        })
+    end,
+})
+
+Tab1:CreateToggle({
+    Name = "Remote logolás (konzolba)",
+    CurrentValue = true,
+    Flag = "LogEnabled",
+    Callback = function(value)
+        State.LogEnabled = value
+    end,
+})
+
+-- ─── TAB 2: INTERAKCIÓK ───
+
+local Tab2 = Window:CreateTab("Interakciók", 4483362458)
+
+Tab2:CreateSection("ProximityPrompt")
+
+Tab2:CreateToggle({
     Name = "Prompt módosítás",
     CurrentValue = false,
     Flag = "PromptEnabled",
@@ -201,7 +359,7 @@ Tab1:CreateToggle({
     end,
 })
 
-Tab1:CreateSlider({
+Tab2:CreateSlider({
     Name = "HoldDuration (másodperc)",
     Range = {0, 3},
     Increment = 0.1,
@@ -213,96 +371,36 @@ Tab1:CreateSlider({
     end,
 })
 
-Tab1:CreateButton({
-    Name = "Promptok frissítése most",
-    Callback = function()
-        applyAllPrompts(workspace)
-        Rayfield:Notify({
-            Title = "Utopia",
-            Content = "Promptok frissítve!",
-            Duration = 3,
-        })
-    end,
-})
-
-Tab1:CreateSection("Auto Collect")
-
-Tab1:CreateToggle({
-    Name = "Auto Collect (brainrotok)",
-    CurrentValue = false,
-    Flag = "AutoCollectEnabled",
-    Callback = function(value)
-        State.AutoCollectEnabled = value
-    end,
-})
-
-Tab1:CreateSlider({
-    Name = "Collect Range (studs)",
-    Range = {10, 200},
-    Increment = 5,
-    Suffix = " studs",
-    CurrentValue = 50,
-    Flag = "CollectRange",
-    Callback = function(value)
-        State.CollectRange = value
-    end,
-})
-
--- ─── TAB 2: VIZUÁLIS ───
-
-local Tab2 = Window:CreateTab("Vizuális", 4483362458)
-
-Tab2:CreateSection("ESP")
-
-Tab2:CreateToggle({
-    Name = "Brainrot ESP",
-    CurrentValue = false,
-    Flag = "ESPEnabled",
-    Callback = function(value)
-        State.ESPEnabled = value
-        if not value then
-            clearESP()
-        end
-    end,
-})
-
-Tab2:CreateButton({
-    Name = "ESP törlése",
-    Callback = function()
-        clearESP()
-    end,
-})
-
 -- ─── TAB 3: INFO ───
 
 local Tab3 = Window:CreateTab("Info", 4483362458)
 
 Tab3:CreateSection("Státusz")
 
-local statusLabel = Tab3:CreateLabel("Promptok módosítva: 0")
+local statusLabel = Tab3:CreateLabel("Promptok: 0 | Skipek: 0")
 
 task.spawn(function()
     while task.wait(1) do
         pcall(function()
-            statusLabel:Set(`Promptok módosítva: {State.PromptCount}`)
+            statusLabel:Set(`Promptok: {State.PromptCount} | Skipek: {State.SkipCount}`)
         end)
     end
 end)
 
-Tab3:CreateSection("Névjegy")
+Tab3:CreateSection("Használat")
 
-Tab3:CreateLabel("Utopia Script v2.0")
-Tab3:CreateLabel("Jump for Brainrots / Animals")
-Tab3:CreateLabel("Készült: Rayfield UI-val")
+Tab3:CreateLabel("1. Menj a minigame-hez")
+Tab3:CreateLabel("2. Kapcsold be az Auto Skip-et")
+Tab3:CreateLabel("3. Nézd a konzolt (F9)")
 
 -- ═══════════════════════════════════════════
 -- ÉRTESÍTÉS
 -- ═══════════════════════════════════════════
 
 Rayfield:Notify({
-    Title = "Utopia Script",
-    Content = "Sikeresen betöltve!",
+    Title = "Utopia Script v3",
+    Content = "Betöltve! Nézd a konzolt (F9)",
     Duration = 5,
 })
 
-print("[Utopia Script] Betöltve!")
+print("[Utopia Script v3] Betöltve!")
